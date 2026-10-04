@@ -10,6 +10,8 @@
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
   const BOX_ATTACH_PX = 80;
+  // A comment written right after a mark is almost always about that mark.
+  const PREVIOUS_ATTACH_PX = 240;
   const NOTE_MAX_W = 280;
   const EDGE_PX = 12;
   const HISTORY_LIMIT = 100;
@@ -724,11 +726,25 @@
 
   // Where a mark points: arrow tip (or tail when the note sits at the tip), or the region.
   function targetOf(mark, reversed) {
-    if (mark.type === 'arrow') {
-      const [x, y] = reversed ? [mark.x1, mark.y1] : [mark.x2, mark.y2];
-      return elementsAt(x, y)[0] ?? null;
+    if (mark.type === 'arrow') return arrowTarget(mark, reversed);
+    const b = boxOf(mark);
+    // A flat freehand line is an underline: it refers to the text just above it.
+    if (mark.type === 'pen' && b.h < 16 && b.w > b.h * 4) return elementsAt(b.x + b.w / 2, b.y - 6)[0] ?? null;
+    return elementForRegion(b);
+  }
+
+  function arrowTarget(mark, reversed) {
+    const [fx, fy, tx, ty] = reversed ? [mark.x2, mark.y2, mark.x1, mark.y1] : [mark.x1, mark.y1, mark.x2, mark.y2];
+    const atTip = elementsAt(tx, ty)[0] ?? null;
+    if (!atTip) return null;
+    // Hand-drawn arrows tend to stop just short of what they point at. If the tip is on a
+    // container, look a little further along the arrow for something inside it.
+    const len = Math.hypot(tx - fx, ty - fy) || 1;
+    for (const step of [6, 12, 18, 24]) {
+      const el = elementsAt(tx + ((tx - fx) / len) * step, ty + ((ty - fy) / len) * step)[0];
+      if (el && el !== atTip && atTip.contains(el)) return el;
     }
-    return elementForRegion(boxOf(mark));
+    return atTip;
   }
 
   function buildComments() {
@@ -748,17 +764,19 @@
       for (const m of marks) {
         let d;
         let reversed = false;
+        let limit;
         if (m.type === 'arrow') {
           const tail = pointBoxDist(m.x1, m.y1, tb);
           const tip = pointBoxDist(m.x2, m.y2, tb);
           // A note next to the tip means the arrow was drawn from the target to the note.
           reversed = tip < tail;
           d = Math.min(tail, tip);
-          if (d > ARROW_ATTACH_PX) continue;
+          limit = ARROW_ATTACH_PX;
         } else {
           d = boxDist(boxOf(m), tb);
-          if (d > BOX_ATTACH_PX) continue;
+          limit = BOX_ATTACH_PX;
         }
+        if (d > (m === previous ? PREVIOUS_ATTACH_PX : limit)) continue;
         if (m === previous) {
           best = { m, d: -1, reversed };
           break;
@@ -836,7 +854,7 @@
       // A drawn region says most precisely what is meant; arrows into it just point at it.
       kind = regions.some((m) => m.type === 'rect') ? 'box' : 'freehand';
       region = unionBox(regions.map(boxOf));
-      target = elementForRegion(region);
+      target = regions.length === 1 ? targetOf(regions[0]) : elementForRegion(region);
       if (!firstText) badge = { x: region.x, y: region.y };
     } else if (arrow) {
       kind = 'arrow';

@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Northwind: analytics for small teams</title>
+    <!-- Demo page used by scripts/screenshots.mjs. Its flaws are on purpose, for the review. -->
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #0f172a; background: #fff; }
+      nav { display: flex; align-items: center; justify-content: space-between; padding: 18px 64px; border-bottom: 1px solid #eef0f4; }
+      .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; }
+      .logo i { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, #6366f1, #22d3ee); }
+      nav ul { display: flex; gap: 32px; margin: 0; padding: 0; list-style: none; color: #475569; font-size: 15px; }
+      .nav-cta { padding: 9px 16px; border-radius: 8px; background: #4f46e5; color: #fff; font-size: 14px; font-weight: 600; }
+      .hero { padding: 80px 64px 56px; text-align: center; background: radial-gradient(60% 80% at 50% 0%, #eef2ff 0%, #fff 70%); }
+      .badge { display: inline-block; padding: 6px 12px; border-radius: 999px; background: #e0e7ff; color: #4338ca; font-size: 13px; font-weight: 600; }
+      h1 { max-width: 880px; margin: 20px auto 16px; font-size: 58px; line-height: 1.06; letter-spacing: -0.03em; }
+      .sub { max-width: 620px; margin: 0 auto 32px; color: #64748b; font-size: 19px; line-height: 1.55; }
+      .ctas { display: flex; justify-content: center; gap: 12px; }
+      .btn { padding: 13px 22px; border-radius: 10px; font-size: 15px; font-weight: 600; }
+      .btn.primary { background: #10b981; color: #fff; }
+      .btn.ghost { border: 1px solid #e2e8f0; }
+      section { padding: 56px 64px; }
+      h2 { margin: 0 0 24px; font-size: 30px; letter-spacing: -0.02em; text-align: center; }
+      .features, .plans { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+      .feature, .plan { padding: 24px; border: 1px solid #eef0f4; border-radius: 16px; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); }
+      .ic { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: #eef2ff; color: #4f46e5; }
+      .ic svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      .ic.odd { border-radius: 50%; background: #fef3c7; color: #d97706; }
+      h3 { margin: 16px 0 6px; font-size: 17px; }
+      p { margin: 0; color: #64748b; font-size: 14.5px; line-height: 1.55; }
+      .pricing { background: #f8fafc; }
+      .plan .price { margin: 12px 0 4px; font-size: 36px; font-weight: 700; letter-spacing: -0.02em; }
+      .plan .price small { color: #94a3b8; font-size: 15px; font-weight: 500; }
+      .plan ul { margin: 16px 0 20px; padding: 0; list-style: none; color: #475569; font-size: 14px; line-height: 2; }
+      .plan .btn { display: block; text-align: center; border: 1px solid #e2e8f0; }
+      .plan { background: #fff; }
+      .quotes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+      .quote { margin: 0; padding: 24px; border-radius: 16px; background: #0f172a; color: #e2e8f0; }
+      .quote blockquote { margin: 0 0 16px; font-size: 16px; line-height: 1.55; }
+      .quote figcaption { color: #94a3b8; font-size: 13px; }
+      footer { padding: 32px 64px 48px; color: #94a3b8; font-size: 13px; text-align: center; }
+    </style>
+  </head>
+  <body>
+    <nav>
+      <div class="logo"><i></i>Northwind</div>
+      <ul><li>Product</li><li>Pricing</li><li>Customers</li><li>Docs</li></ul>
+      <span class="nav-cta">Start free</span>
+    </nav>
+
+    <header class="hero">
+      <span class="badge">New · Smart alerts</span>
+      <h1>Analytics that small teams actually understand and use every day</h1>
+      <p class="sub">Northwind turns your product data into clear dashboards and timely alerts, without a data team.</p>
+      <div class="ctas"><span class="btn primary">Start free trial</span><span class="btn ghost">Book a demo</span></div>
+    </header>
+
+    <section id="features">
+      <h2>Everything you need, nothing you don't</h2>
+      <div class="features">
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg></div>
+          <h3>Live dashboards</h3>
+          <p>See signups, revenue and retention update in real time, with analitics your whole team can read.</p>
+        </div>
+        <div class="feature">
+          <div class="ic odd"><svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg></div>
+          <h3>Smart alerts</h3>
+          <p>Get a message when a metric moves in a way that matters, not every time it twitches.</p>
+        </div>
+        <div class="feature">
+          <div class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0"/><path d="M17 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/></svg></div>
+          <h3>Team sharing</h3>
+          <p>Share any chart with a link. Comments and mentions keep the discussion next to the data.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="pricing" id="pricing">
+      <h2>Simple pricing</h2>
+      <div class="plans">
+        <div class="plan"><h3>Starter</h3><div class="price">$0 <small>/ month</small></div><ul><li>3 dashboards</li><li>7-day history</li><li>Email alerts</li></ul><span class="btn">Get started</span></div>
+        <div class="plan"><h3>Pro</h3><div class="price">$29 <small>/ month</small></div><ul><li>Unlimited dashboards</li><li>1-year history</li><li>Slack & email alerts</li></ul><span class="btn">Start trial</span></div>
+        <div class="plan"><h3>Business</h3><div class="price">$99 <small>/ month</small></div><ul><li>Everything in Pro</li><li>SSO & audit log</li><li>Priority support</li></ul><span class="btn">Contact sales</span></div>
+      </div>
+    </section>
+
+    <section id="customers">
+      <h2>Teams love Northwind</h2>
+      <div class="quotes">
+        <figure class="quote"><blockquote>"We replaced three tools with Northwind in a week, and people actually open the dashboards now."</blockquote><figcaption>Maya Chen · Head of Growth, Fieldnote</figcaption></figure>
+        <figure class="quote"><blockquote>"Smart alerts caught a checkout bug before our customers did."</blockquote><figcaption>Jonas Weber · CTO, Kettle</figcaption></figure>
+        <figure class="quote"><blockquote>"Finally, analytics our support team can use without asking engineering."</blockquote><figcaption>Priya Nair · Ops Lead, Larkspur</figcaption></figure>
+      </div>
+    </section>
+    <footer>© 2026 Northwind Labs · A demo page for Page Review screenshots</footer>
+  </body>
+</html>

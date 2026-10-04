@@ -297,6 +297,36 @@ try {
   assert.ok(note.x + note.w <= 1280 - 10, `note fits on screen (right edge ${note.x + note.w})`);
   if (!AGENT) assert.equal((await store.listReviews()).length, 0, 'flag off: still nothing sent');
 
+  // Linking: an arrow that stops just short of a button still targets the button, and a
+  // comment written right after a box belongs to it even ~110px away.
+  await inject(); // close (saved)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const buyBox = await page.locator('#buy').boundingBox();
+  const tip = [buyBox.x + buyBox.width + 5, buyBox.y + buyBox.height / 2];
+  await page.keyboard.press('a');
+  await drag([tip[0] + 200, tip[1] + 60], tip);
+  await page.keyboard.press('t');
+  await page.mouse.click(tip[0] + 205, tip[1] + 75);
+  await page.keyboard.type('Arrow stops short');
+  await page.keyboard.press('Enter');
+  const api = await page.locator('.card').nth(2).boundingBox();
+  await page.keyboard.press('r');
+  await drag([api.x - 6, api.y - 6], [api.x + api.width + 6, api.y + api.height + 6]);
+  await page.keyboard.press('t');
+  await page.mouse.click(api.x + 20, api.y + api.height + 150);
+  await page.keyboard.type('Far from its box');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Control+s');
+  await page.locator('page-review-overlay .toast').filter({ hasText: saved('2 comments') }).waitFor();
+  const linking = (await storedReviews())[0];
+  const short = linking.comments.find((c) => c.text === 'Arrow stops short');
+  assert.equal(short?.target.selector, '#buy', `arrow short of button -> ${short?.target.selector}`);
+  const far = linking.comments.find((c) => c.text === 'Far from its box');
+  assert.equal(far?.kind, 'box', 'far comment attached to the box drawn before it');
+  assert.equal(far.target.text, 'API Layer');
+
   console.log(`E2E OK (AGENT_SYNC=${AGENT}): see ${path.relative(root, outDir) || 'test/out'}/`);
 } finally {
   await context.close();
