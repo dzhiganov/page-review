@@ -145,6 +145,7 @@
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
   let avatarSrc = null; // the user's avatar (Settings on the reviews page), shown on comment cards
+  let avatarBlocked = false; // the page refused to load it once (e.g. its CSP): use the icon from then on
   let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, toastEl, toastTimer;
 
   // ---------- lifecycle ----------
@@ -187,7 +188,7 @@
     window.addEventListener('keydown', onKeyDown, true);
 
     chrome.storage.local.get('settings').then(({ settings }) => {
-      avatarSrc = settings?.avatar ?? null;
+      avatarSrc = avatarBlocked ? null : (settings?.avatar ?? null);
       if (avatarSrc && state.open) renderAll();
     });
     Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false });
@@ -569,8 +570,12 @@
       const img = document.createElement('img');
       img.alt = '';
       img.onerror = () => {
+        avatarBlocked = true; // e.g. the page's CSP blocks data: images
+        avatarSrc = null;
+        const n = avatar.querySelector('.n')?.textContent; // drawBadges may already have numbered it
         avatar.classList.remove('photo');
-        avatar.innerHTML = icon('text'); // e.g. the page's CSP blocks data: images
+        if (n) avatar.textContent = n;
+        else avatar.innerHTML = icon('text');
       };
       img.src = avatarSrc;
       avatar.classList.add('photo');
