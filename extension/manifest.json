@@ -11,8 +11,7 @@
     "contextMenus",
     "clipboardWrite",
     "alarms",
-    "downloads",
-    "downloads.ui"
+    "downloads"
   ],
   "background": {
     "service_worker": "background.js",

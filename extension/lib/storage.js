@@ -30,11 +30,30 @@ export async function exportReview(review, settings) {
   return null;
 }
 
-// Removes the copy outside the browser, wherever it was written.
+// Removes the copy outside the browser, wherever it was written, whatever the setting is now.
 export async function removeExport(id, settings) {
   settings ??= await getSettings();
-  if (sendsToServer(settings, AGENT_SYNC)) await deleteRemote(id);
+  const { synced = {} } = await chrome.storage.local.get('synced');
+  if (synced[id] || sendsToServer(settings, AGENT_SYNC)) await deleteRemote(id); // also clears synced[id]
   await removeFromDownloads(id);
+}
+
+// The service worker and the reviews page both update the "downloaded" bookkeeping, so
+// read-modify-write of it runs under a Web Lock (shared by all of the extension's pages).
+const localChains = new Map();
+export function withLock(name, fn) {
+  if (globalThis.navigator?.locks) return navigator.locks.request(name, fn);
+  const run = (localChains.get(name) ?? Promise.resolve()).then(fn); // no Web Locks (unit tests)
+  localChains.set(name, run.catch(() => {}));
+  return run;
+}
+
+export function updateDownloaded(change) {
+  return withLock('page-review-downloaded', async () => {
+    const { downloaded = {} } = await chrome.storage.local.get('downloaded');
+    const extra = change(downloaded);
+    await chrome.storage.local.set({ downloaded, ...extra });
+  });
 }
 
 export function reviewPaths(folder, id) {
@@ -50,43 +69,43 @@ export function storedReview(review) {
 }
 
 async function writeToDownloads(review, folder) {
+  // The downloads bubble stays visible: hiding it (downloads.setUiOptions) is browser-wide
+  // and would stay hidden if the service worker died mid-write.
   const paths = reviewPaths(folder, review.id);
-  const hideUi = chrome.downloads.setUiOptions ? (enabled) => chrome.downloads.setUiOptions({ enabled }).catch(() => {}) : () => {};
-  // Three files per review would pop the downloads bubble every time.
-  await hideUi(false);
-  try {
-    const png = await download(review.screenshot, paths.screenshot);
-    // Chrome reports the absolute path, which the agent instructions use.
-    const [item] = await chrome.downloads.search({ id: png });
-    const root = item?.filename ? rootOf(item.filename, review.id) : null;
-    const shotPath = item?.filename ?? 'screenshot.png';
-    const json = await download(textUrl(JSON.stringify(storedReview(review), null, 2), 'application/json'), paths.json);
-    const md = await download(textUrl(toMarkdown(review, shotPath), 'text/markdown'), paths.md);
-    const { downloaded = {} } = await chrome.storage.local.get('downloaded');
+  const png = await download(review.screenshot, paths.screenshot);
+  // Chrome reports the absolute path, which the agent instructions use.
+  const [item] = await chrome.downloads.search({ id: png });
+  const root = item?.filename ? rootOf(item.filename, review.id) : null;
+  const shotPath = item?.filename ?? 'screenshot.png';
+  const json = await download(textUrl(JSON.stringify(storedReview(review), null, 2), 'application/json'), paths.json);
+  const md = await download(textUrl(toMarkdown(review, shotPath), 'text/markdown'), paths.md);
+  await updateDownloaded((downloaded) => {
     downloaded[review.id] = { folder, ids: [png, json, md] };
-    await chrome.storage.local.set({ downloaded, ...(root ? { downloadsRoot: { folder, path: root } } : {}) });
-  } finally {
-    await hideUi(true);
-  }
+    return root ? { downloadsRoot: { folder, path: root } } : {};
+  });
 }
 
 async function removeFromDownloads(id) {
-  const { downloaded = {} } = await chrome.storage.local.get('downloaded');
-  const entry = downloaded[id];
-  if (!entry) return;
-  if (chrome.downloads) {
-    for (const dl of entry.ids) {
-      await chrome.downloads.removeFile(dl).catch(() => {}); // already gone, or moved by the user
-      await chrome.downloads.erase({ id: dl }).catch(() => {});
-    }
+  let entry;
+  await updateDownloaded((downloaded) => {
+    entry = downloaded[id];
+    delete downloaded[id];
+  });
+  if (!entry || !chrome.downloads) return;
+  for (const dl of entry.ids) {
+    await chrome.downloads.removeFile(dl).catch(() => {}); // already gone, or moved by the user
+    await chrome.downloads.erase({ id: dl }).catch(() => {});
   }
-  delete downloaded[id];
-  await chrome.storage.local.set({ downloaded });
 }
 
 // Writes the reviews that aren't in the current downloads folder yet (after switching
 // to Downloads, changing the folder, or a failed write).
-export async function writePendingDownloads(settings) {
+export function writePendingDownloads(settings) {
+  // One backfill at a time, so two settings changes in a row don't write everything twice.
+  return withLock('page-review-backfill', () => backfill(settings));
+}
+
+async function backfill(settings) {
   settings ??= await getSettings();
   if (settings.storage !== 'downloads') return 0;
   const all = await chrome.storage.local.get(null);
