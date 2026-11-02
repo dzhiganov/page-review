@@ -1333,11 +1333,18 @@
   function onKeyDown(e) {
     const mod = e.ctrlKey || e.metaKey;
     if (state.textInput && e.composedPath().includes(state.textInput.ta)) {
-      // Typing a comment: only saving still works (it keeps what was typed).
-      if (mod && e.code === 'KeyS') {
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        save();
+      // Typing a comment: saving still works (it keeps what was typed), and so does undo/redo
+      // while a new comment is still empty, e.g. right after drawing an arrow.
+      const blank = !state.textInput.original && !state.textInput.ta.value.trim();
+      const history = mod && (e.code === 'KeyZ' || e.code === 'KeyY');
+      if (!(mod && e.code === 'KeyS') && !(history && blank)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.code === 'KeyS') save();
+      else {
+        commitText({ cancel: true });
+        if (e.code === 'KeyY' || e.shiftKey) redo();
+        else undo();
       }
       return;
     }

@@ -348,6 +348,16 @@ try {
   assert.equal(await overlay('.note-card textarea').inputValue(), 'Edit me please', 'double-click edits');
   await page.keyboard.press('Escape');
 
+  // Undo/redo right after drawing an arrow: the empty comment closes and the arrow goes.
+  await page.keyboard.press('a');
+  await drag([300, 650], [450, 560]);
+  assert.equal(await overlay('.note-card textarea').count(), 1);
+  await page.keyboard.press('Control+z');
+  assert.equal(await overlay('.note-card textarea').count(), 0, 'undo closes the empty comment');
+  assert.equal(await overlay('g[data-type="arrow"]').count(), 0, 'undo removes the arrow');
+  await page.keyboard.press('Control+Shift+z');
+  assert.equal(await overlay('g[data-type="arrow"]').count(), 1, 'redo brings the arrow back');
+  assert.equal(await overlay('.note-card').count(), 1, 'no empty comment left');
   page.once('dialog', (d) => d.accept());
   await inject(); // close (unsaved: confirm)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
