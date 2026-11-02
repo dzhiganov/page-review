@@ -82,20 +82,17 @@ try {
     await page.mouse.up();
   };
 
-  // 1) Arrow from empty space to the sidebar nav, note at the tail.
+  // 1) Arrow from empty space to the sidebar nav: a comment opens at the tail right away.
   const nav = await page.locator('aside nav a').nth(2).boundingBox();
   await drag([560, 520], [nav.x + 40, nav.y + nav.height / 2]);
-  await page.keyboard.press('t');
-  await page.mouse.click(570, 530);
+  await page.locator('page-review-overlay .note-card textarea').waitFor();
   await page.keyboard.type('Make font bigger');
   await page.keyboard.press('Enter');
 
-  // 2) Box around the buy button, note right next to it.
+  // 2) Box around the buy button: its comment opens at the box's corner.
   const buy = await page.locator('#buy').boundingBox();
   await page.keyboard.press('r');
   await drag([buy.x - 6, buy.y - 6], [buy.x + buy.width + 6, buy.y + buy.height + 6]);
-  await page.keyboard.press('t');
-  await page.mouse.click(buy.x + buy.width + 30, buy.y);
   await page.keyboard.type('Use brand purple here');
   await page.keyboard.press('Enter');
 
@@ -169,6 +166,10 @@ try {
   assert.ok(font, 'arrow comment exists');
   assert.equal(font.kind, 'arrow');
   assert.equal(font.target.text, 'Frontend');
+  // The comment typed right after the arrow is attached to it and has the default font.
+  const fontNote = review.shapes.find((sh) => sh.type === 'text' && sh.text === 'Make font bigger');
+  assert.ok(review.shapes.some((sh) => sh.id === fontNote.mark && sh.type === 'arrow'), 'comment attached to its arrow');
+  assert.deepEqual(fontNote.font, { family: 'sans', size: 14, weight: 400, color: '#1e1e1e' });
   const brand = byText('Use brand purple here');
   assert.ok(brand, 'box comment exists');
   assert.equal(brand.kind, 'box');
@@ -248,6 +249,7 @@ try {
     await page.waitForSelector('page-review-overlay');
     await page.keyboard.press('a');
     await drag([700, 600], [400, 300]);
+    await page.keyboard.press('Escape'); // no comment for this one
     await page.keyboard.press('Control+s');
     await page.locator('page-review-overlay .toast').filter({ hasText: 'once a Claude Code session is open' }).waitFor();
     assert.equal((await store.listReviews()).length, 1, 'offline save did not reach the server');
@@ -280,8 +282,6 @@ try {
   await drag([h1.x, h1.y + h1.height + 4], [h1.x + h1.width, h1.y + h1.height + 6]); // underline
   await page.keyboard.press('a');
   await drag([1200, 420], [h1.x + h1.width + 10, h1.y + h1.height + 8]);
-  await page.keyboard.press('t');
-  await page.mouse.click(1210, 430);
   await page.keyboard.type('can we make the title a bit smaller and less heavy please');
   await page.keyboard.press('Enter');
   await page.screenshot({ path: path.join(outDir, '4-grouped.png') });
@@ -307,13 +307,12 @@ try {
   const tip = [buyBox.x + buyBox.width + 5, buyBox.y + buyBox.height / 2];
   await page.keyboard.press('a');
   await drag([tip[0] + 200, tip[1] + 60], tip);
-  await page.keyboard.press('t');
-  await page.mouse.click(tip[0] + 205, tip[1] + 75);
   await page.keyboard.type('Arrow stops short');
   await page.keyboard.press('Enter');
   const api = await page.locator('.card').nth(2).boundingBox();
   await page.keyboard.press('r');
   await drag([api.x - 6, api.y - 6], [api.x + api.width + 6, api.y + api.height + 6]);
+  await page.keyboard.press('Escape'); // skip the automatic comment, write one by hand further away
   await page.keyboard.press('t');
   await page.mouse.click(api.x + 20, api.y + api.height + 150);
   await page.keyboard.type('Far from its box');

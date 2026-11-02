@@ -32,6 +32,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Start / stop reviewing | Click the icon or **Alt+Shift+R** |
 | Tools | **V** select/move · **P** pen · **A** arrow · **R** box · **T** comment · **E** eraser |
 | Colors | **1–5** (also recolors the selected drawing) |
+| Comment on a mark | Finish an arrow or box and type; **Enter** adds it, **Esc** skips it |
 | Move | Select tool → drag. Comments can be dragged with any tool. Arrow keys nudge (Shift = 10px) |
 | Delete | Select → **Delete**/Backspace, or the eraser |
 | Edit a comment | Double-click it, or click it and use the bar next to it (text, font, size, bold, color, delete) |

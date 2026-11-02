@@ -372,8 +372,11 @@
     if (e.button !== 0 || e.target.closest('textarea')) return;
     if (state.textInput) {
       commitText();
-      state.skipClick = true;
-      return;
+      // With the Comment tool a click elsewhere just finishes the comment; other tools carry on.
+      if (state.tool === 'text') {
+        state.skipClick = true;
+        return;
+      }
     }
     const x = e.clientX;
     const y = e.clientY;
@@ -459,6 +462,11 @@
     delete s.oy;
     addShape(s);
     showHint(s);
+    // An arrow or a box is almost always followed by a comment about it: start one right away.
+    if (s.type === 'arrow' || s.type === 'rect') {
+      const [ax, ay] = s.type === 'arrow' ? [s.x1, s.y1] : [s.x + s.w, s.y];
+      openNoteEditor(null, ax, ay, s.id);
+    }
   }
 
   function onStageClick(e) {
@@ -484,9 +492,17 @@
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
   }
 
+  // Moves a shape and re-renders it; comments attached to a mark travel with it.
   function move(s, dx, dy) {
     translate(s, dx, dy);
     renderShape(s);
+    if (s.type === 'text') return;
+    for (const note of state.shapes) {
+      if (note.type === 'text' && note.mark === s.id) {
+        translate(note, dx, dy);
+        renderShape(note);
+      }
+    }
   }
 
   function select(id) {
@@ -526,10 +542,11 @@
   // ---------- comment cards ----------
 
   // A Figma-style comment: avatar pin + card, whose sharp corner sits on the clicked spot.
-  function openNoteEditor(existing, ax, ay) {
+  // `mark` attaches a new comment to the arrow or box it was started from.
+  function openNoteEditor(existing, ax, ay, mark) {
     const shape = existing
       ? { ...existing, font: normalizeFont(existing.font) }
-      : { id: uid(), type: 'text', ax, ay, text: '', font: { ...state.noteFont } };
+      : { id: uid(), type: 'text', ax, ay, text: '', font: { ...state.noteFont }, ...(mark ? { mark } : {}) };
     if (existing) {
       nodes.get(existing.id)?.remove();
       nodes.delete(existing.id);
@@ -734,12 +751,21 @@
   }
 
   // Card grows up and to the right from its anchor; flips near the right/top edges.
+  // A comment attached to an arrow opens away from the arrow, so it doesn't cover it.
   function placeNote(el, s) {
     const vw = host.clientWidth || innerWidth;
+    const vh = host.clientHeight || innerHeight;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const flipX = s.ax + noteMaxWidth(s.font) > vw - EDGE_PX;
-    const flipY = s.ay - h < EDGE_PX;
+    const fitsRight = s.ax + noteMaxWidth(s.font) <= vw - EDGE_PX;
+    const fitsAbove = s.ay - h >= EDGE_PX;
+    let flipX = !fitsRight;
+    let flipY = !fitsAbove;
+    const arrow = s.mark && state.shapes.find((m) => m.id === s.mark && m.type === 'arrow');
+    if (arrow) {
+      if (arrow.x2 > arrow.x1 && s.ax - w >= EDGE_PX) flipX = true;
+      if (arrow.y2 < arrow.y1 && s.ay + h <= vh - EDGE_PX) flipY = true;
+    }
     el.classList.toggle('flip-x', flipX);
     el.classList.toggle('flip-y', flipY);
     const left = Math.max(EDGE_PX, flipX ? s.ax - w : s.ax);
@@ -930,8 +956,10 @@
       // before this note wins over a slightly closer one, if it's in range.
       const order = state.shapes.indexOf(t);
       const previous = state.shapes.slice(0, order).reverse().find((s) => s.type !== 'text');
+      // A comment started from an arrow or box belongs to it wherever it's moved.
+      const attached = t.mark && marks.find((m) => m.id === t.mark);
       let best = null;
-      for (const m of marks) {
+      for (const m of attached ? [attached] : marks) {
         let d;
         let reversed = false;
         let limit;
@@ -946,8 +974,8 @@
           d = boxDist(boxOf(m), tb);
           limit = BOX_ATTACH_PX;
         }
-        if (d > (m === previous ? PREVIOUS_ATTACH_PX : limit)) continue;
-        if (m === previous) {
+        if (m !== attached && d > (m === previous ? PREVIOUS_ATTACH_PX : limit)) continue;
+        if (m === previous || m === attached) {
           best = { m, d: -1, reversed };
           break;
         }
@@ -1234,8 +1262,16 @@
   // Uses e.code (physical key), so Ctrl+Z etc. also work with e.g. a Russian layout,
   // where e.key would be "я".
   function onKeyDown(e) {
-    if (state.textInput && e.composedPath().includes(state.textInput.ta)) return;
     const mod = e.ctrlKey || e.metaKey;
+    if (state.textInput && e.composedPath().includes(state.textInput.ta)) {
+      // Typing a comment: only saving still works (it keeps what was typed).
+      if (mod && e.code === 'KeyS') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        save();
+      }
+      return;
+    }
     const plain = !mod && !e.altKey;
     const sel = selectedShape();
     const tool = plain && TOOLS.find((t) => t.code === e.code);
