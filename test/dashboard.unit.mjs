@@ -1,5 +1,5 @@
 // Unit tests: composition layout, templates and settings persistence, agent instructions.
-// Run: npm run test:unit
+// Run: npm run test:unit (all test/*.unit.mjs)
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';

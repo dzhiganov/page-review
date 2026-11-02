@@ -6,6 +6,9 @@
   }
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
+  const { recognize } = globalThis.PageReviewSmooth;
+  const PREFS_KEY = 'editorPrefs';
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -29,6 +32,7 @@
     clear: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14h10l1-14"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
+    edit: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   };
 
   // Shortcuts use physical keys (e.code), so they also work with non-Latin layouts.
@@ -85,7 +89,34 @@
       all: unset; display: block; padding: 4px 0; min-width: 180px; max-width: ${NOTE_MAX_W - 54}px;
       field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: inherit; cursor: text;
     }
-    .note-card textarea::placeholder { color: #8a8a93; }
+    .note-card textarea::placeholder { color: #8a8a93; font-weight: 400; }
+    .note-card.new { animation: note-in .14s cubic-bezier(.2,.9,.3,1.15); transform-origin: 0 100%; }
+    .note-card.flip-x.new { transform-origin: 100% 100%; }
+    .note-card.flip-y.new { transform-origin: 0 0; }
+    .note-card.flip-x.flip-y.new { transform-origin: 100% 0; }
+    .note-card.leaving { animation: note-out .12s ease-in forwards; pointer-events: none; }
+    @keyframes note-in { from { opacity: 0; transform: scale(.9); } }
+    @keyframes note-out { to { opacity: 0; transform: scale(.94); } }
+
+    .note-tools {
+      position: fixed; display: flex; align-items: center; gap: 1px; padding: 4px;
+      background: #1f1f24; color: #eee; border-radius: 10px; user-select: none;
+      box-shadow: 0 6px 20px rgba(0,0,0,.25); font: 13px/1 system-ui, sans-serif;
+    }
+    .note-tools[hidden] { display: none; }
+    .note-tools button {
+      all: unset; box-sizing: border-box; height: 26px; min-width: 26px; padding: 0 5px;
+      display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer;
+    }
+    .note-tools button:hover { background: rgba(255,255,255,.12); }
+    .note-tools button[aria-pressed="true"] { background: #5f3dc4; }
+    .note-tools button.color { min-width: 22px; padding: 0; }
+    .note-tools button.color[aria-pressed="true"] { background: none; box-shadow: inset 0 0 0 2px #fff; }
+    .note-tools .swatch { width: 14px; height: 14px; }
+    .note-tools .size { min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; opacity: .8; }
+    .note-tools .sep { height: 16px; margin: 0 3px; }
+    .note-tools.editing [data-note="edit"], .note-tools.editing [data-note="edit"] + .sep { display: none; }
+    .note-tools svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     .toolbar {
       position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
@@ -106,6 +137,9 @@
     .toolbar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .toolbar .grip { cursor: grab; min-width: 20px; padding: 0; opacity: .6; }
     .toolbar .grip svg { fill: currentColor; stroke: none; }
+    .toolbar label.smooth { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px 0 6px; height: 32px; cursor: pointer; opacity: .85; }
+    .toolbar label.smooth:hover { opacity: 1; }
+    .toolbar label.smooth input { margin: 0; accent-color: #845ef7; cursor: pointer; }
     .sep { width: 1px; height: 20px; background: rgba(255,255,255,.18); margin: 0 4px; }
     .swatch { width: 18px; height: 18px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
     .toolbar button.color { min-width: 26px; padding: 0; }
@@ -124,7 +158,8 @@
     .toast[hidden] { display: none; }
     .toast button { all: unset; cursor: pointer; color: #b197fc; font-weight: 600; }
     :host(.capturing) .toolbar, :host(.capturing) .hints, :host(.capturing) .selection,
-    :host(.capturing) .toast, :host(.capturing) .frame { display: none !important; }
+    :host(.capturing) .toast, :host(.capturing) .frame, :host(.capturing) .note-tools,
+    :host(.capturing) .note-card.leaving { display: none !important; }
   `;
 
   const state = {
@@ -140,13 +175,16 @@
     erasing: false,
     textInput: null,
     skipClick: false,
+    pressedNote: null, // comment just clicked; pointer capture retargets the click to the stage
     dirty: false,
     saving: false,
+    smooth: false, // clean up freehand strokes (remembered in editorPrefs)
+    noteFont: { ...DEFAULT_FONT }, // font for new comments: the last one picked in this session
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
   let avatarSrc = null; // the user's avatar (Settings on the reviews page), shown on comment cards
   let avatarBlocked = false; // the page refused to load it once (e.g. its CSP): use the icon from then on
-  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, toastEl, toastTimer;
+  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, noteTools, toastEl, toastTimer;
 
   // ---------- lifecycle ----------
 
@@ -164,6 +202,7 @@
       <div class="frame"></div>
       <div class="hints"></div>
       <div class="toolbar" role="toolbar"></div>
+      <div class="note-tools" role="toolbar" hidden></div>
       <div class="toast" hidden></div>
     `;
     stage = shadow.querySelector('.stage');
@@ -174,8 +213,11 @@
     notesLayer = shadow.querySelector('.notes');
     hintsEl = shadow.querySelector('.hints');
     toolbar = shadow.querySelector('.toolbar');
+    noteTools = shadow.querySelector('.note-tools');
     toastEl = shadow.querySelector('.toast');
     buildToolbar();
+    buildNoteTools();
+    loadPrefs();
 
     stage.addEventListener('pointerdown', onPointerDown);
     stage.addEventListener('pointermove', onPointerMove);
@@ -191,7 +233,7 @@
       avatarSrc = avatarBlocked ? null : (settings?.avatar ?? null);
       if (avatarSrc && state.open) renderAll();
     });
-    Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false });
+    Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT } });
     nodes.clear();
     document.documentElement.appendChild(host);
     setTool(state.tool);
@@ -223,6 +265,7 @@
     for (const t of TOOLS) {
       parts.push(`<button data-tool="${t.id}" title="${t.title}">${icon(t.id)}</button>`);
     }
+    parts.push('<label class="smooth" title="Straighten lines and clean up freehand strokes"><input type="checkbox">Smooth</label>');
     parts.push('<span class="sep"></span>');
     COLORS.forEach((c, i) => {
       parts.push(
@@ -251,8 +294,25 @@
       else if (action === 'save') save();
       else if (action === 'close') close();
     });
+    toolbar.querySelector('.smooth input').addEventListener('change', (e) => {
+      state.smooth = e.target.checked;
+      savePrefs();
+    });
     enableToolbarDrag(toolbar.querySelector('.grip'));
     setColor(state.color);
+  }
+
+  // Editor preferences live in their own storage key, apart from `settings`.
+  async function loadPrefs() {
+    try {
+      const { [PREFS_KEY]: prefs } = await chrome.storage.local.get(PREFS_KEY);
+      state.smooth = prefs?.smooth === true;
+    } catch {} // storage unavailable: defaults
+    if (toolbar) toolbar.querySelector('.smooth input').checked = state.smooth;
+  }
+
+  function savePrefs() {
+    chrome.storage.local.set({ [PREFS_KEY]: { smooth: state.smooth } }).catch(() => {});
   }
 
   function enableToolbarDrag(grip) {
@@ -349,10 +409,14 @@
 
   function onPointerDown(e) {
     if (e.button !== 0 || e.target.closest('textarea')) return;
+    state.pressedNote = null;
     if (state.textInput) {
       commitText();
-      state.skipClick = true;
-      return;
+      // With the Comment tool a click elsewhere just finishes the comment; other tools carry on.
+      if (state.tool === 'text') {
+        state.skipClick = true;
+        return;
+      }
     }
     const x = e.clientX;
     const y = e.clientY;
@@ -362,8 +426,9 @@
       if (hit) removeShape(hit);
       return;
     }
-    // Anything can be dragged with the Select tool; comment cards with any tool but Comment.
-    if (hit && (state.tool === 'select' || (hit.type === 'text' && state.tool !== 'text'))) {
+    // Anything can be dragged with the Select tool; comment cards with any tool
+    // (with the Comment tool, a click without dragging edits the comment).
+    if (hit && (state.tool === 'select' || hit.type === 'text')) {
       select(hit.id);
       state.drag = { shape: hit, x, y, moved: false };
       stage.setPointerCapture(e.pointerId);
@@ -393,9 +458,8 @@
         pushHistory();
         drag.moved = true;
       }
-      translate(drag.shape, x - drag.x, y - drag.y);
+      move(drag.shape, x - drag.x, y - drag.y);
       Object.assign(drag, { x, y });
-      renderShape(drag.shape);
       renderSelection();
       return;
     }
@@ -420,6 +484,8 @@
       if (state.drag.moved) {
         state.dirty = true;
         state.skipClick = true;
+      } else if (state.drag.shape.type === 'text') {
+        state.pressedNote = state.drag.shape.id;
       }
       state.drag = null;
       return;
@@ -436,8 +502,27 @@
     if (tooSmall) return;
     delete s.ox;
     delete s.oy;
-    addShape(s);
-    showHint(s);
+    const shape = s.type === 'pen' && state.smooth ? smoothed(s) : s;
+    addShape(shape);
+    showHint(shape);
+    // An arrow or a box is almost always followed by a comment about it: start one right away.
+    if (shape.type === 'arrow' || shape.type === 'rect') {
+      const [ax, ay] = shape.type === 'arrow' ? [shape.x1, shape.y1] : [shape.x + shape.w, shape.y];
+      openNoteEditor(null, ax, ay, shape.id);
+    }
+  }
+
+  // A pen stroke after recognition: a straight line, arrow, box, ellipse or smooth curve.
+  function smoothed(s) {
+    const r = recognize(s.points);
+    if (!r) return s;
+    const { id, color } = s;
+    if (r.type === 'arrow') {
+      const { x1, y1, x2, y2, cx, cy } = r;
+      return { id, type: 'arrow', color, x1, y1, x2, y2, ...(cx === undefined ? {} : { cx, cy }) };
+    }
+    if (r.type === 'rect') return { id, type: 'rect', color, x: r.x, y: r.y, w: r.w, h: r.h };
+    return { ...s, points: r.points };
   }
 
   function onStageClick(e) {
@@ -446,21 +531,46 @@
       return;
     }
     if (state.tool !== 'text' || e.target.closest('textarea')) return;
-    const hit = shapeAt(e.target);
+    const hit = clickedShape(e);
     if (hit?.type === 'text') openNoteEditor(hit);
     else openNoteEditor(null, e.clientX, e.clientY);
   }
 
   function onStageDblClick(e) {
-    const hit = shapeAt(e.target);
+    const hit = clickedShape(e);
     if (hit?.type === 'text' && !state.textInput) openNoteEditor(hit);
+  }
+
+  // A comment pressed without dragging captured the pointer, so its click lands on the stage.
+  function clickedShape(e) {
+    return shapeAt(e.target) ?? state.shapes.find((s) => s.id === state.pressedNote) ?? null;
   }
 
   function translate(s, dx, dy) {
     if (s.type === 'pen') s.points = s.points.map(([px, py]) => [px + dx, py + dy]);
-    else if (s.type === 'arrow') Object.assign(s, { x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy });
+    else if (s.type === 'arrow') {
+      Object.assign(s, { x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy });
+      if (isCurved(s)) Object.assign(s, { cx: s.cx + dx, cy: s.cy + dy });
+    }
     else if (s.type === 'rect') Object.assign(s, { x: s.x + dx, y: s.y + dy });
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
+  }
+
+  // Moves a shape and re-renders it; comments attached to a mark travel with it.
+  function move(s, dx, dy) {
+    translate(s, dx, dy);
+    renderShape(s);
+    if (s.type === 'text') return;
+    for (const note of state.shapes) {
+      if (note.type === 'text' && note.mark === s.id) {
+        translate(note, dx, dy);
+        renderShape(note);
+      }
+    }
+  }
+
+  function isCurved(s) {
+    return Number.isFinite(s.cx) && Number.isFinite(s.cy);
   }
 
   function select(id) {
@@ -500,14 +610,18 @@
   // ---------- comment cards ----------
 
   // A Figma-style comment: avatar pin + card, whose sharp corner sits on the clicked spot.
-  function openNoteEditor(existing, ax, ay) {
-    const shape = existing ? { ...existing } : { id: uid(), type: 'text', ax, ay, text: '' };
+  // `mark` attaches a new comment to the arrow or box it was started from.
+  function openNoteEditor(existing, ax, ay, mark) {
+    const shape = existing
+      ? { ...existing, font: normalizeFont(existing.font) }
+      : { id: uid(), type: 'text', ax, ay, text: '', font: { ...state.noteFont }, ...(mark ? { mark } : {}) };
     if (existing) {
       nodes.get(existing.id)?.remove();
       nodes.delete(existing.id);
     }
     select(null);
     const el = noteCard(shape, true);
+    if (!existing) el.classList.add('new');
     const ta = el.querySelector('textarea');
     ta.value = shape.text;
     notesLayer.appendChild(el);
@@ -516,7 +630,10 @@
     for (const type of ['keydown', 'keyup', 'keypress']) {
       ta.addEventListener(type, (e) => e.stopPropagation());
     }
-    ta.addEventListener('input', () => placeNote(el, shape));
+    ta.addEventListener('input', () => {
+      placeNote(el, shape);
+      updateNoteTools();
+    });
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -528,6 +645,7 @@
     });
     ta.addEventListener('blur', () => commitText());
     state.textInput = { el, ta, shape, original: existing };
+    updateNoteTools();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }
@@ -536,19 +654,25 @@
     const edit = state.textInput;
     if (!edit) return;
     state.textInput = null;
-    edit.el.remove();
-    const { shape, original } = edit;
+    const { el, shape, original } = edit;
     const text = edit.ta.value.trim();
-    const unchanged = original && text === original.text;
+    const unchanged = original && text === original.text && sameFont(original.font, shape.font);
     if (cancel || unchanged || (!original && !text)) {
-      if (original) renderShape(original);
+      if (original) {
+        el.remove();
+        renderShape(original);
+      } else {
+        dismiss(el);
+      }
+      updateNoteTools();
       return;
     }
+    el.remove();
     pushHistory();
     if (original && !text) {
       state.shapes = state.shapes.filter((s) => s !== original);
     } else if (original) {
-      original.text = text;
+      Object.assign(original, { text, font: shape.font });
       renderShape(original);
     } else {
       shape.text = text;
@@ -556,6 +680,121 @@
       renderShape(shape);
     }
     state.dirty = true;
+    updateNoteTools();
+  }
+
+  // A cancelled new comment fades out instead of vanishing.
+  function dismiss(el) {
+    el.classList.remove('new');
+    el.classList.add('leaving');
+    el.querySelector('textarea')?.blur();
+    setTimeout(() => el.remove(), 150);
+  }
+
+  function sameFont(a, b) {
+    return JSON.stringify(normalizeFont(a)) === JSON.stringify(normalizeFont(b));
+  }
+
+  // Wider cards for bigger text, so a large comment doesn't wrap every other word.
+  function noteMaxWidth(font) {
+    return NOTE_MAX_W + Math.max(0, normalizeFont(font).size - DEFAULT_FONT.size) * 12;
+  }
+
+  // ---------- comment tools (popover over the selected or edited comment) ----------
+
+  const FAMILY_NAMES = { sans: 'Sans', serif: 'Serif', mono: 'Mono' };
+
+  function buildNoteTools() {
+    const parts = [`<button data-note="edit" title="Edit (Enter)">${icon('edit')}</button><span class="sep"></span>`];
+    for (const [f, name] of Object.entries(FAMILY_NAMES)) parts.push(`<button data-family="${f}" title="${name}">Aa</button>`);
+    parts.push('<span class="sep"></span>');
+    parts.push('<button data-size="-1" title="Smaller">−</button><span class="size"></span><button data-size="1" title="Larger">+</button>');
+    parts.push('<button data-note="bold" title="Bold"><b>B</b></button>');
+    parts.push('<span class="sep"></span>');
+    for (const c of COLORS) {
+      parts.push(`<button class="color" data-note-color="${c}" title="Text color"><span class="swatch" style="background:${c}"></span></button>`);
+    }
+    parts.push('<span class="sep"></span>');
+    parts.push(`<button data-note="delete" title="Delete (Del)">${icon('clear')}</button>`);
+    noteTools.innerHTML = parts.join('');
+    for (const b of noteTools.querySelectorAll('[data-family]')) b.style.fontFamily = globalThis.PageReviewNotes.FAMILIES[b.dataset.family];
+    // Clicking a tool must not take the focus from the comment being typed.
+    noteTools.addEventListener('mousedown', preventDefault);
+    noteTools.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      const s = noteToolsTarget();
+      if (!btn || !s) return;
+      const d = btn.dataset;
+      const font = normalizeFont(s.font);
+      if (d.note === 'edit') openNoteEditor(s);
+      else if (d.note === 'delete') deleteNote(s);
+      else if (d.family) setNoteFont(s, { family: d.family });
+      else if (d.size) setNoteFont(s, { size: stepSize(font.size, Number(d.size)) });
+      else if (d.note === 'bold') setNoteFont(s, { weight: font.weight === 700 ? 400 : 700 });
+      else if (d.noteColor) setNoteFont(s, { color: d.noteColor });
+    });
+  }
+
+  function noteToolsTarget() {
+    if (state.textInput) return state.textInput.shape;
+    const sel = selectedShape();
+    return sel?.type === 'text' ? sel : null;
+  }
+
+  function updateNoteTools() {
+    if (!noteTools) return;
+    const s = noteToolsTarget();
+    const card = s && (state.textInput?.el ?? nodes.get(s.id));
+    noteTools.hidden = !card;
+    if (!card) return;
+    const f = normalizeFont(s.font);
+    noteTools.classList.toggle('editing', !!state.textInput);
+    for (const b of noteTools.querySelectorAll('[data-family]')) b.setAttribute('aria-pressed', String(b.dataset.family === f.family));
+    for (const b of noteTools.querySelectorAll('[data-note-color]')) b.setAttribute('aria-pressed', String(b.dataset.noteColor === f.color));
+    noteTools.querySelector('[data-note="bold"]').setAttribute('aria-pressed', String(f.weight === 700));
+    noteTools.querySelector('.size').textContent = String(f.size);
+    // On the side of the card away from its pin (so it doesn't cover what the pin points at),
+    // or the other side when there's no room.
+    const r = card.getBoundingClientRect();
+    const t = noteTools.getBoundingClientRect();
+    const above = r.top - t.height - 8;
+    const below = r.bottom + 8;
+    const pinOnTop = card.classList.contains('flip-y');
+    const fitsBelow = below + t.height <= innerHeight - EDGE_PX;
+    const top = (pinOnTop && fitsBelow) || above < EDGE_PX ? below : above;
+    noteTools.style.left = `${clamp(r.left, EDGE_PX, innerWidth - t.width - EDGE_PX)}px`;
+    noteTools.style.top = `${top}px`;
+  }
+
+  // The picked font also becomes the font for new comments, until the overlay closes.
+  function setNoteFont(s, patch) {
+    const font = normalizeFont({ ...normalizeFont(s.font), ...patch });
+    state.noteFont = font;
+    if (state.textInput) {
+      const { el, shape } = state.textInput;
+      shape.font = font;
+      styleNoteBody(el, shape);
+      placeNote(el, shape);
+    } else {
+      pushHistory();
+      s.font = font;
+      renderShape(s);
+      state.dirty = true;
+    }
+    updateNoteTools();
+  }
+
+  function deleteNote(s) {
+    if (!state.textInput) return removeShape(s);
+    const { original } = state.textInput;
+    commitText({ cancel: true });
+    if (original) removeShape(original);
+  }
+
+  function styleNoteBody(el, s) {
+    const body = el.querySelector('textarea, .text');
+    Object.assign(body.style, noteCss(s.font), { maxWidth: `${noteMaxWidth(s.font) - 54}px` });
+    el.style.maxWidth = `${noteMaxWidth(s.font)}px`;
   }
 
   function noteCard(s, editing) {
@@ -590,16 +829,26 @@
       body.textContent = s.text;
     }
     el.append(avatar, body);
+    styleNoteBody(el, s);
     return el;
   }
 
   // Card grows up and to the right from its anchor; flips near the right/top edges.
+  // A comment attached to an arrow opens away from the arrow, so it doesn't cover it.
   function placeNote(el, s) {
     const vw = host.clientWidth || innerWidth;
+    const vh = host.clientHeight || innerHeight;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const flipX = s.ax + NOTE_MAX_W > vw - EDGE_PX;
-    const flipY = s.ay - h < EDGE_PX;
+    const fitsRight = s.ax + noteMaxWidth(s.font) <= vw - EDGE_PX;
+    const fitsAbove = s.ay - h >= EDGE_PX;
+    let flipX = !fitsRight;
+    let flipY = !fitsAbove;
+    const arrow = s.mark && state.shapes.find((m) => m.id === s.mark && m.type === 'arrow');
+    if (arrow) {
+      if (arrow.x2 > arrow.x1 && s.ax - w >= EDGE_PX) flipX = true;
+      if (arrow.y2 < arrow.y1 && s.ay + h <= vh - EDGE_PX) flipY = true;
+    }
     el.classList.toggle('flip-x', flipX);
     el.classList.toggle('flip-y', flipY);
     const left = Math.max(EDGE_PX, flipX ? s.ax - w : s.ax);
@@ -632,6 +881,7 @@
       let el = nodes.get(s.id);
       if (el) {
         el.querySelector('.text').textContent = s.text;
+        styleNoteBody(el, s);
       } else {
         el = noteCard(s, false);
         notesLayer.appendChild(el);
@@ -666,6 +916,7 @@
   function renderSelection() {
     selectionLayer.replaceChildren();
     for (const el of notesLayer.querySelectorAll('.note-card.selected')) el.classList.remove('selected');
+    updateNoteTools();
     const s = selectedShape();
     if (!s) return;
     if (s.type === 'text') {
@@ -692,23 +943,36 @@
     return `${d} L${last[0]} ${last[1]}`;
   }
 
-  function arrowPath({ x1, y1, x2, y2 }) {
-    const angle = Math.atan2(y2 - y1, x2 - x1);
+  // Straight, or a quadratic curve when the arrow has a control point (cx, cy).
+  function arrowPath(s) {
+    const { x1, y1, x2, y2 } = s;
+    const curved = isCurved(s);
+    const angle = curved ? Math.atan2(y2 - s.cy, x2 - s.cx) : Math.atan2(y2 - y1, x2 - x1);
     const head = Math.min(18, Math.hypot(x2 - x1, y2 - y1) * 0.4);
     const ax = (a) => x2 - head * Math.cos(angle + a);
     const ay = (a) => y2 - head * Math.sin(angle + a);
-    return `M${x1} ${y1} L${x2} ${y2} M${ax(0.45)} ${ay(0.45)} L${x2} ${y2} L${ax(-0.45)} ${ay(-0.45)}`;
+    const shaft = curved ? `M${x1} ${y1} Q${s.cx} ${s.cy} ${x2} ${y2}` : `M${x1} ${y1} L${x2} ${y2}`;
+    return `${shaft} M${ax(0.45)} ${ay(0.45)} L${x2} ${y2} L${ax(-0.45)} ${ay(-0.45)}`;
+  }
+
+  function curvePoints(s, n = 16) {
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const t = i / n;
+      const u = 1 - t;
+      return [u * u * s.x1 + 2 * u * t * s.cx + t * t * s.x2, u * u * s.y1 + 2 * u * t * s.cy + t * t * s.y2];
+    });
   }
 
   // ---------- linking drawings to DOM elements ----------
 
   function boxOf(s) {
     if (s.type === 'rect' || s.type === 'text') return { x: s.x, y: s.y, w: s.w, h: s.h };
-    if (s.type === 'arrow') {
+    if (s.type === 'arrow' && !isCurved(s)) {
       return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
     }
-    const xs = s.points.map((p) => p[0]);
-    const ys = s.points.map((p) => p[1]);
+    const points = s.type === 'arrow' ? curvePoints(s) : s.points;
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
     const x = Math.min(...xs);
     const y = Math.min(...ys);
     return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
@@ -762,7 +1026,8 @@
   }
 
   function arrowTarget(mark, reversed) {
-    const [fx, fy, tx, ty] = reversed ? [mark.x2, mark.y2, mark.x1, mark.y1] : [mark.x1, mark.y1, mark.x2, mark.y2];
+    let [fx, fy, tx, ty] = reversed ? [mark.x2, mark.y2, mark.x1, mark.y1] : [mark.x1, mark.y1, mark.x2, mark.y2];
+    if (isCurved(mark)) [fx, fy] = [mark.cx, mark.cy]; // a curve arrives along its last tangent
     const atTip = elementsAt(tx, ty)[0] ?? null;
     if (!atTip) return null;
     // Hand-drawn arrows tend to stop just short of what they point at. If the tip is on a
@@ -788,8 +1053,10 @@
       // before this note wins over a slightly closer one, if it's in range.
       const order = state.shapes.indexOf(t);
       const previous = state.shapes.slice(0, order).reverse().find((s) => s.type !== 'text');
+      // A comment started from an arrow or box belongs to it wherever it's moved.
+      const attached = t.mark && marks.find((m) => m.id === t.mark);
       let best = null;
-      for (const m of marks) {
+      for (const m of attached ? [attached] : marks) {
         let d;
         let reversed = false;
         let limit;
@@ -804,8 +1071,8 @@
           d = boxDist(boxOf(m), tb);
           limit = BOX_ATTACH_PX;
         }
-        if (d > (m === previous ? PREVIOUS_ATTACH_PX : limit)) continue;
-        if (m === previous) {
+        if (m !== attached && d > (m === previous ? PREVIOUS_ATTACH_PX : limit)) continue;
+        if (m === previous || m === attached) {
           best = { m, d: -1, reversed };
           break;
         }
@@ -1099,8 +1366,23 @@
   // Uses e.code (physical key), so Ctrl+Z etc. also work with e.g. a Russian layout,
   // where e.key would be "я".
   function onKeyDown(e) {
-    if (state.textInput && e.composedPath().includes(state.textInput.ta)) return;
     const mod = e.ctrlKey || e.metaKey;
+    if (state.textInput && e.composedPath().includes(state.textInput.ta)) {
+      // Typing a comment: saving still works (it keeps what was typed), and so does undo/redo
+      // while a new comment is still empty, e.g. right after drawing an arrow.
+      const blank = !state.textInput.original && !state.textInput.ta.value.trim();
+      const history = mod && (e.code === 'KeyZ' || e.code === 'KeyY');
+      if (!(mod && e.code === 'KeyS') && !(history && blank)) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.code === 'KeyS') save();
+      else {
+        commitText({ cancel: true });
+        if (e.code === 'KeyY' || e.shiftKey) redo();
+        else undo();
+      }
+      return;
+    }
     const plain = !mod && !e.altKey;
     const sel = selectedShape();
     const tool = plain && TOOLS.find((t) => t.code === e.code);
@@ -1113,8 +1395,7 @@
     else if (sel && NUDGE[e.key]) {
       const step = e.shiftKey ? 10 : 1;
       pushHistory();
-      translate(sel, NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
-      renderShape(sel);
+      move(sel, NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
       renderSelection();
       state.dirty = true;
     } else if (sel && plain && e.key === 'Enter' && sel.type === 'text') openNoteEditor(sel);

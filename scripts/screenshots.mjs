@@ -42,7 +42,7 @@ try {
   const toggleOverlay = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/smooth.js', 'content.js'] });
     }, pageUrl);
   const openOverlay = async () => {
     await toggleOverlay();
@@ -76,6 +76,8 @@ try {
       ];
     });
   const comment = async (x, y, text) => {
+    // Arrows and boxes open a comment of their own; this script places comments by hand.
+    if (await page.locator('page-review-overlay .note-card textarea').count()) await page.keyboard.press('Escape');
     await page.keyboard.press('t');
     await page.mouse.click(x, y);
     await page.keyboard.type(text);
