@@ -73,6 +73,13 @@
       box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.35);
     }
     .note-card .avatar svg { width: 15px; height: 15px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .note-card .avatar.photo { position: relative; }
+    .note-card .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+    .note-card .avatar .n {
+      position: absolute; right: -6px; bottom: -6px; min-width: 18px; height: 18px; padding: 0 4px; box-sizing: border-box;
+      border-radius: 9px; background: #18181b; color: #fff; font: 700 11px/18px Inter, "Segoe UI", system-ui, sans-serif;
+      text-align: center; box-shadow: 0 0 0 1.5px #fff;
+    }
     .note-card .text { padding: 4px 0; max-width: ${NOTE_MAX_W - 54}px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .note-card textarea {
       all: unset; display: block; padding: 4px 0; min-width: 180px; max-width: ${NOTE_MAX_W - 54}px;
@@ -137,6 +144,7 @@
     saving: false,
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
+  let avatarSrc = null; // the user's avatar (Settings on the reviews page), shown on comment cards
   let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, toastEl, toastTimer;
 
   // ---------- lifecycle ----------
@@ -178,6 +186,10 @@
     host.addEventListener('touchmove', preventDefault, { passive: false });
     window.addEventListener('keydown', onKeyDown, true);
 
+    chrome.storage.local.get('settings').then(({ settings }) => {
+      avatarSrc = settings?.avatar ?? null;
+      if (avatarSrc && state.open) renderAll();
+    });
     Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false });
     nodes.clear();
     document.documentElement.appendChild(host);
@@ -553,6 +565,17 @@
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
     avatar.innerHTML = icon('text');
+    if (avatarSrc) {
+      const img = document.createElement('img');
+      img.alt = '';
+      img.onerror = () => {
+        avatar.classList.remove('photo');
+        avatar.innerHTML = icon('text'); // e.g. the page's CSP blocks data: images
+      };
+      img.src = avatarSrc;
+      avatar.classList.add('photo');
+      avatar.replaceChildren(img);
+    }
     const body = document.createElement(editing ? 'textarea' : 'div');
     if (editing) {
       body.rows = 1;
@@ -1031,6 +1054,13 @@
     for (const c of comments) {
       const noteId = c.shapeIds.find((id) => state.shapes.find((sh) => sh.id === id)?.type === 'text');
       const avatar = noteId && nodes.get(noteId)?.querySelector('.avatar');
+      if (avatar?.classList.contains('photo')) {
+        const n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = String(c.n);
+        avatar.append(n);
+        continue;
+      }
       if (avatar) {
         avatar.textContent = String(c.n);
         continue;
