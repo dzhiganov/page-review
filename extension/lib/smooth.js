@@ -20,6 +20,8 @@
     rectAxisSlack: 20, // ...and box sides must be within this many degrees of the axes
     ellipseError: 0.13, // mean radial error of an ellipse fit
     curveSimplify: 0.02, // RDP epsilon for curves, relative to the diagonal
+    reversalTurn: 150, // degrees: the stroke goes back on itself (crossing out, scribbling)
+    reversalStepPx: 8, // measured between points this far apart, so tremor doesn't count
   };
 
   const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -133,7 +135,16 @@
     });
   }
 
+  // Does the stroke go back on itself somewhere? RDP would hide this (a back-and-forth
+  // scribble simplifies to one segment), so it's checked on the raw path.
+  function hasReversal(pts) {
+    const coarse = [pts[0]];
+    for (const p of pts) if (dist(coarse[coarse.length - 1], p) >= T.reversalStepPx) coarse.push(p);
+    return coarse.some((p, i) => i > 0 && i < coarse.length - 1 && Math.abs(turn(coarse[i - 1], p, coarse[i + 1])) > T.reversalTurn);
+  }
+
   function asLine(pts) {
+    if (hasReversal(pts)) return false;
     const [a, b] = [pts[0], pts[pts.length - 1]];
     const chord = dist(a, b);
     if (!chord) return false;
@@ -300,6 +311,8 @@
       const shaft = findArrowShaft(pts);
       if (shaft) return asArrow(shaft);
     }
+    // A scribble or crossing-out: smoothing would only mangle it, keep it as drawn.
+    if (hasReversal(pts)) return null;
     const eps = Math.max(1.5, Math.min(8, diag * T.curveSimplify));
     const simple = rdp(soften(pts), eps);
     if (closed) return { type: 'curve', points: catmullRom(simple.slice(0, -1), { closed: true }) };

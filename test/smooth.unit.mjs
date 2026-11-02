@@ -87,13 +87,13 @@ test('a curved shaft with a head becomes a curved arrow', () => {
 
 test('a zigzag is not an arrow', () => {
   const s = recognize(polyline([[0, 0], [100, 0], [20, 30], [120, 30], [40, 60], [140, 60]]));
-  assert.notEqual(s.type, 'arrow');
+  assert.notEqual(s?.type, 'arrow');
 });
 
 test('a head as long as the shaft is not an arrow', () => {
   const tip = [100, 0];
   const s = recognize([...polyline([[0, 0], tip]), ...polyline([tip, [10, 30]]).slice(1)]);
-  assert.notEqual(s.type, 'arrow');
+  assert.notEqual(s?.type, 'arrow');
 });
 
 test('a wobbly closed loop around a box becomes a rectangle', () => {
@@ -204,4 +204,11 @@ test('wobbly lines in every direction stay lines', () => {
     const s = recognize(jitter(polyline([[300, 300], [300 + Math.cos(a) * 160, 300 + Math.sin(a) * 160]]), 2, deg + 3));
     assert.equal(s.type, 'line', `${deg}°`);
   }
+});
+
+test('a back-and-forth scribble (crossing out) stays freehand', () => {
+  const scribble = polyline([[100, 100], [300, 104], [110, 108], [305, 112], [105, 116]]);
+  assert.equal(recognize(jitter(scribble, 1.5)), null);
+  // Even a single double-back along one line is not a line.
+  assert.equal(recognize(polyline([[100, 100], [300, 100], [140, 102]])), null);
 });
