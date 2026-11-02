@@ -25,6 +25,14 @@ export function wslPath(p) {
   return m ? `/mnt/${m[1].toLowerCase()}/${m[2].replace(/\\/g, '/')}` : null;
 }
 
+// Inline Markdown code that survives backticks in the text (a folder may contain them).
+export function code(text) {
+  const longest = Math.max(0, ...(String(text).match(/`+/g) ?? []).map((run) => run.length));
+  if (!longest) return `\`${text}\``;
+  const fence = '`'.repeat(longest + 1);
+  return `${fence} ${text} ${fence}`;
+}
+
 const INTRO =
   'The user marks up web pages in Chrome with the Page Review extension: arrows, boxes, freehand marks and ' +
   'comment cards. Each saved review is an annotated screenshot plus a description of every comment and the page ' +
@@ -37,7 +45,7 @@ function filesBody({ storage, root, known, folder }) {
   const where = [];
   if (storage === 'server') {
     where.push(
-      `Reviews are in \`${dir}\`, written by the local page-review server (\`npm run serve\` in the page-review ` +
+      `Reviews are in ${code(dir)}, written by the local page-review server (\`npm run serve\` in the page-review ` +
         'repo, or its MCP server inside Claude Code). Reviews saved while the server was down arrive within ' +
         'about 30 seconds of it starting.',
     );
@@ -50,18 +58,18 @@ function filesBody({ storage, root, known, folder }) {
     );
   } else {
     where.push(
-      `Reviews are in \`${dir}\`, written there by Chrome as downloads. Treat the folder as read-only: ` +
+      `Reviews are in ${code(dir)}, written there by Chrome as downloads. Treat the folder as read-only: ` +
         "the extension doesn't read it back, and deleting a review in the extension deletes its files.",
     );
     if (!known) {
       where.push(
         '',
         "That's Chrome's default Downloads folder. If it isn't there, the user changed Chrome's download " +
-          `location: look for the \`${folder}\` folder there instead.`,
+          `location: look for the ${code(folder)} folder there instead.`,
       );
     }
   }
-  if (wsl) where.push('', `From WSL the same folder is \`${wsl}/reviews\`.`);
+  if (wsl) where.push('', `From WSL the same folder is ${code(`${wsl}/reviews`)}.`);
 
   return `${INTRO}
 
@@ -130,8 +138,10 @@ const READING = `## Reading a review
 Some items combine several reviews into one image with a template (for example Before / After, Expected /
 Actual, Desktop / Mobile). They have no comments of their own; \`composite.sources\` lists each panel in order
 (left to right, then top to bottom in a 2×2 grid) with its \`label\`, page \`url\`, review \`id\` and comments.
-Read the source reviews by id for full element details. In a Before / After or Expected / Actual image, the
-first panel is the reference and the second is what to change or fix.
+Each panel's \`label\` says what it shows (Before, After, Expected, Actual, Mobile...). Go by the labels,
+not by the panel order, and don't guess which panel is right: the user's comments say what to change.
+Read the source reviews by id for full element details. A source review may have been deleted since the
+image was made; then use the comments copied into \`composite.sources\` and the image itself.
 
 ## Finding the code
 
