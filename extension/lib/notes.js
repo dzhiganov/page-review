@@ -45,12 +45,5 @@
     };
   }
 
-  // Brings a stored shape up to the current format. Comments get a complete font; other
-  // shapes pass through. Returns a new object, the input is not changed.
-  function migrateShape(shape) {
-    if (!shape || shape.type !== 'text') return shape;
-    return { ...shape, text: typeof shape.text === 'string' ? shape.text : '', font: normalizeFont(shape.font) };
-  }
-
-  globalThis.PageReviewNotes = { FAMILIES, SIZES, DEFAULT_FONT, normalizeFont, stepSize, noteCss, migrateShape };
+  globalThis.PageReviewNotes = { FAMILIES, SIZES, DEFAULT_FONT, normalizeFont, stepSize, noteCss };
 })();
