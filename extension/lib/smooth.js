@@ -10,9 +10,9 @@
     lineDeviationPx: 5, // ...but always allow a few pixels of hand wobble
     lineStraightness: 1.1, // path length / chord length
     arrowTurn: 110, // degrees: how sharply the stroke doubles back at the tip
-    arrowHeadMax: 0.6, // head path length relative to the shaft
+    arrowHeadMax: 0.5, // how far the head reaches from the tip, relative to the shaft length
     arrowHeadMinPx: 6,
-    arrowHeadMaxPx: 90,
+    arrowHeadMaxPx: 60,
     arrowBarbAngle: 75, // degrees between a barb and the shaft, pointing back
     curvedShaft: 0.08, // shaft bulge relative to its chord before it counts as curved
     closedGap: 0.2, // start-end gap relative to the bounding box diagonal
@@ -143,34 +143,41 @@
     return dev <= Math.max(T.lineDeviationPx, chord * T.lineDeviation) && len / chord <= T.lineStraightness;
   }
 
-  // Line plus a hook/V at the end. Returns the tip's index in `pts`, or -1.
-  function findArrowTip(pts) {
+  // Line plus a hook/V at the end. Returns the shaft (tail to tip), or null.
+  function findArrowShaft(pts) {
     const total = pathLength(pts);
-    const eps = Math.max(3, Math.hypot(bbox(pts).w, bbox(pts).h) * 0.03);
+    const eps = Math.max(3, Math.min(6, Math.hypot(bbox(pts).w, bbox(pts).h) * 0.03));
     const simple = rdp(pts, eps);
     // Walk back from the end: the tip is the last sharp reversal with only a short head after it.
     for (let k = simple.length - 2; k >= 1; k--) {
       if (Math.abs(turn(simple[k - 1], simple[k], simple[k + 1])) < T.arrowTurn) continue;
-      const tipIdx = pts.indexOf(simple[k]);
-      const shaft = pts.slice(0, tipIdx + 1);
-      const head = pts.slice(tipIdx);
-      const shaftLen = pathLength(shaft);
-      const headLen = pathLength(head);
-      if (headLen < T.arrowHeadMinPx || headLen > T.arrowHeadMaxPx || headLen > shaftLen * T.arrowHeadMax) continue;
-      if (shaftLen < total * 0.5) continue;
-      // Every barb points back along the shaft.
       const tip = simple[k];
+      const tipIdx = pts.indexOf(tip);
+      // A V head returns to the tip before its second barb: the shaft ends at the first arrival.
+      const near = Math.max(4, eps);
+      const end = pts.findIndex((p, i) => i <= tipIdx && dist(p, tip) <= near);
+      const shaft = [...pts.slice(0, end), tip];
+      const shaftLen = pathLength(shaft);
+      // How far the head reaches from the tip (a V head goes out and back twice).
+      const reach = Math.max(...pts.slice(end).map((p) => dist(p, tip)));
+      if (reach < T.arrowHeadMinPx || reach > T.arrowHeadMaxPx || reach > shaftLen * T.arrowHeadMax) continue;
+      if (shaftLen < total * 0.4) continue;
+      // The shaft itself never doubles back; otherwise this "tip" is really a barb.
+      const inShaft = simple.filter((p) => pts.indexOf(p) < end);
+      inShaft.push(tip);
+      if (inShaft.some((p, i) => i > 0 && i < inShaft.length - 1 && Math.abs(turn(inShaft[i - 1], p, inShaft[i + 1])) >= T.arrowTurn)) continue;
+      // Every barb points back along the shaft.
       const back = shaftEndDirection(shaft);
-      const barbs = simple.slice(k + 1).filter((p) => dist(p, tip) > T.arrowHeadMinPx * 0.75);
+      const barbs = simple.filter((p) => pts.indexOf(p) > end && dist(p, tip) > T.arrowHeadMinPx * 0.75);
       if (!barbs.length) continue;
       const ok = barbs.every((p) => {
         const v = [(p[0] - tip[0]) / dist(p, tip), (p[1] - tip[1]) / dist(p, tip)];
         const cos = v[0] * back[0] + v[1] * back[1];
         return (Math.acos(Math.max(-1, Math.min(1, cos))) * 180) / Math.PI <= T.arrowBarbAngle;
       });
-      if (ok) return tipIdx;
+      if (ok) return shaft;
     }
-    return -1;
+    return null;
   }
 
   // Unit vector from the tip back along the last stretch of the shaft.
@@ -205,20 +212,42 @@
     return pts[pts.length - 1];
   }
 
-  function asArrow(pts, tipIdx) {
-    const shaft = pts.slice(0, tipIdx + 1);
+  function asArrow(shaft) {
     const [a, b] = [shaft[0], shaft[shaft.length - 1]];
     const arrow = { type: 'arrow', x1: round(a[0]), y1: round(a[1]), x2: round(b[0]), y2: round(b[1]) };
     const chord = dist(a, b);
     const bulge = Math.max(...shaft.map((p) => segDist(p, a, b)));
-    if (bulge > Math.max(T.lineDeviationPx, chord * T.curvedShaft)) {
-      // Quadratic Bezier through the shaft's midpoint: C = 2M - (A + B) / 2.
-      const m = pointAt(shaft, 0.5);
-      arrow.cx = round(2 * m[0] - (a[0] + b[0]) / 2);
-      arrow.cy = round(2 * m[1] - (a[1] + b[1]) / 2);
-    }
-    return arrow;
+    if (bulge <= Math.max(T.lineDeviationPx, chord * T.curvedShaft)) return arrow;
+    const c = tangentControl(shaft) ?? midpointControl(shaft);
+    return { ...arrow, cx: round(c[0]), cy: round(c[1]) };
   }
+
+  // Quadratic Bezier control point where the start and end tangents meet, so the arrow
+  // leaves and arrives in the directions it was drawn. Null when that fits the stroke badly.
+  function tangentControl(shaft) {
+    const [a, b] = [shaft[0], shaft[shaft.length - 1]];
+    const u = sub(pointAt(shaft, 0.15), a);
+    const v = sub(b, pointAt(shaft, 0.85));
+    const den = u[0] * v[1] - u[1] * v[0];
+    if (Math.abs(den) < 1e-6) return null;
+    // a + s*u = b - t*v
+    const d = sub(b, a);
+    const s = (d[0] * v[1] - d[1] * v[0]) / den;
+    const t = (u[0] * d[1] - u[1] * d[0]) / den;
+    if (s <= 0 || t <= 0) return null;
+    const c = [a[0] + s * u[0], a[1] + s * u[1]];
+    const mid = [(a[0] + 2 * c[0] + b[0]) / 4, (a[1] + 2 * c[1] + b[1]) / 4];
+    return dist(mid, pointAt(shaft, 0.5)) <= dist(a, b) * 0.12 ? c : null;
+  }
+
+  // Quadratic Bezier through the shaft's midpoint: C = 2M - (A + B) / 2.
+  function midpointControl(shaft) {
+    const [a, b] = [shaft[0], shaft[shaft.length - 1]];
+    const m = pointAt(shaft, 0.5);
+    return [2 * m[0] - (a[0] + b[0]) / 2, 2 * m[1] - (a[1] + b[1]) / 2];
+  }
+
+  const sub = (p, q) => [p[0] - q[0], p[1] - q[1]];
 
   function asRect(pts, box) {
     const diag = Math.hypot(box.w, box.h);
@@ -268,8 +297,8 @@
       if (shape) return shape;
     } else {
       if (asLine(pts)) return { type: 'line', points: [roundPt(first), roundPt(last)] };
-      const tip = findArrowTip(pts);
-      if (tip > 0) return asArrow(pts, tip);
+      const shaft = findArrowShaft(pts);
+      if (shaft) return asArrow(shaft);
     }
     const eps = Math.max(1.5, Math.min(8, diag * T.curveSimplify));
     const simple = rdp(soften(pts), eps);

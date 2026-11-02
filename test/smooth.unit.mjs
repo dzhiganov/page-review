@@ -162,3 +162,46 @@ test('catmullRom passes through its control points', () => {
   const out = catmullRom(ctrl, { step: 5 });
   for (const p of ctrl) assert.ok(out.some((q) => Math.hypot(q[0] - p[0], q[1] - p[1]) < 0.2), `passes ${p}`);
 });
+
+test('a short straight arrow with a V head stays straight', () => {
+  const tip = [180, 100];
+  const s = recognize([...jitter(polyline([[100, 100], tip]), 1), ...head(tip, 0, 16, 0.6)]);
+  assert.equal(s.type, 'arrow');
+  assert.equal(s.cx, undefined, `control ${s.cx},${s.cy}`);
+  assert.ok(Math.hypot(s.x2 - 180, s.y2 - 100) < 4);
+});
+
+test('a curved arrow arrives in the direction it was drawn', () => {
+  // Quarter circle from (100,300) to (250,150), arriving heading right.
+  const shaft = jitter(arc(250, 300, 150, Math.PI, Math.PI * 1.5), 1.5);
+  const tip = shaft[shaft.length - 1];
+  const s = recognize([...shaft, ...head(tip, 0)]);
+  const arrival = (Math.atan2(s.y2 - s.cy, s.x2 - s.cx) * 180) / Math.PI;
+  assert.ok(Math.abs(arrival) < 15, `arrives at ${arrival}°`);
+});
+
+test('straight arrows in every direction, length and head shape', () => {
+  const misses = [];
+  let seed = 1;
+  for (let deg = 0; deg < 360; deg += 30) {
+    for (const len of [70, 200, 450]) {
+      for (const spread of [0.4, 0.6, 0.8]) {
+        const a = (deg * Math.PI) / 180;
+        const tail = [500, 500];
+        const tip = [tail[0] + Math.cos(a) * len, tail[1] + Math.sin(a) * len];
+        const s = recognize([...jitter(polyline([tail, tip]), 1.5, seed++), ...jitter(head(tip, a, 16, spread), 1, seed++)]);
+        const ok = s.type === 'arrow' && s.cx === undefined && Math.hypot(s.x2 - tip[0], s.y2 - tip[1]) < 6;
+        if (!ok) misses.push(`${deg}° ${len}px spread ${spread}: ${JSON.stringify(s).slice(0, 80)}`);
+      }
+    }
+  }
+  assert.deepEqual(misses, []);
+});
+
+test('wobbly lines in every direction stay lines', () => {
+  for (let deg = 0; deg < 360; deg += 45) {
+    const a = (deg * Math.PI) / 180;
+    const s = recognize(jitter(polyline([[300, 300], [300 + Math.cos(a) * 160, 300 + Math.sin(a) * 160]]), 2, deg + 3));
+    assert.equal(s.type, 'line', `${deg}°`);
+  }
+});
