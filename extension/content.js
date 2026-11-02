@@ -229,9 +229,9 @@
     host.addEventListener('touchmove', preventDefault, { passive: false });
     window.addEventListener('keydown', onKeyDown, true);
 
+    // Ready long before the first comment; a re-render here could drop an open comment editor.
     chrome.storage.local.get('settings').then(({ settings }) => {
       avatarSrc = avatarBlocked ? null : (settings?.avatar ?? null);
-      if (avatarSrc && state.open) renderAll();
     });
     Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT } });
     nodes.clear();
