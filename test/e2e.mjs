@@ -326,6 +326,32 @@ try {
   assert.equal(far?.kind, 'box', 'far comment attached to the box drawn before it');
   assert.equal(far.target.text, 'API Layer');
 
+  // Editing: clicking a comment with the Comment tool edits it (not a new one), and so does a
+  // double-click with the Select tool.
+  await inject(); // close (saved)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const overlay = (sel) => page.locator(`page-review-overlay ${sel}`);
+  await page.keyboard.press('t');
+  await page.mouse.click(700, 600);
+  await page.keyboard.type('Edit me');
+  await page.keyboard.press('Enter');
+  const editCard = await overlay('.note-card').boundingBox();
+  await page.mouse.click(editCard.x + editCard.width / 2, editCard.y + editCard.height / 2);
+  assert.equal(await overlay('.note-card textarea').inputValue(), 'Edit me', 'Comment tool click edits the comment');
+  await page.keyboard.type(' please');
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await overlay('.note-card .text').allTextContents(), ['Edit me please']);
+  await page.keyboard.press('v');
+  await page.mouse.dblclick(editCard.x + editCard.width / 2, editCard.y + editCard.height / 2);
+  assert.equal(await overlay('.note-card textarea').inputValue(), 'Edit me please', 'double-click edits');
+  await page.keyboard.press('Escape');
+
+  page.once('dialog', (d) => d.accept());
+  await inject(); // close (unsaved: confirm)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
   console.log(`E2E OK (AGENT_SYNC=${AGENT}): see ${path.relative(root, outDir) || 'test/out'}/`);
 } finally {
   await context.close();

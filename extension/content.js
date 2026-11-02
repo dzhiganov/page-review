@@ -168,6 +168,7 @@
     erasing: false,
     textInput: null,
     skipClick: false,
+    pressedNote: null, // comment just clicked; pointer capture retargets the click to the stage
     dirty: false,
     saving: false,
     smooth: false, // clean up freehand strokes (remembered in editorPrefs)
@@ -395,6 +396,7 @@
 
   function onPointerDown(e) {
     if (e.button !== 0 || e.target.closest('textarea')) return;
+    state.pressedNote = null;
     if (state.textInput) {
       commitText();
       // With the Comment tool a click elsewhere just finishes the comment; other tools carry on.
@@ -469,6 +471,8 @@
       if (state.drag.moved) {
         state.dirty = true;
         state.skipClick = true;
+      } else if (state.drag.shape.type === 'text') {
+        state.pressedNote = state.drag.shape.id;
       }
       state.drag = null;
       return;
@@ -514,14 +518,19 @@
       return;
     }
     if (state.tool !== 'text' || e.target.closest('textarea')) return;
-    const hit = shapeAt(e.target);
+    const hit = clickedShape(e);
     if (hit?.type === 'text') openNoteEditor(hit);
     else openNoteEditor(null, e.clientX, e.clientY);
   }
 
   function onStageDblClick(e) {
-    const hit = shapeAt(e.target);
+    const hit = clickedShape(e);
     if (hit?.type === 'text' && !state.textInput) openNoteEditor(hit);
+  }
+
+  // A comment pressed without dragging captured the pointer, so its click lands on the stage.
+  function clickedShape(e) {
+    return shapeAt(e.target) ?? state.shapes.find((s) => s.id === state.pressedNote) ?? null;
   }
 
   function translate(s, dx, dy) {
