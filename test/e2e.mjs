@@ -70,7 +70,7 @@ try {
   const inject = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'content.js'] });
     }, pageUrl);
   await inject();
   await page.waitForSelector('page-review-overlay');

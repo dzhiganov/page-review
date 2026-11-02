@@ -6,6 +6,7 @@
   }
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
+  const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -29,6 +30,7 @@
     clear: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14h10l1-14"/>',
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
+    edit: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
   };
 
   // Shortcuts use physical keys (e.code), so they also work with non-Latin layouts.
@@ -78,7 +80,34 @@
       all: unset; display: block; padding: 4px 0; min-width: 180px; max-width: ${NOTE_MAX_W - 54}px;
       field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: inherit; cursor: text;
     }
-    .note-card textarea::placeholder { color: #8a8a93; }
+    .note-card textarea::placeholder { color: #8a8a93; font-weight: 400; }
+    .note-card.new { animation: note-in .14s cubic-bezier(.2,.9,.3,1.15); transform-origin: 0 100%; }
+    .note-card.flip-x.new { transform-origin: 100% 100%; }
+    .note-card.flip-y.new { transform-origin: 0 0; }
+    .note-card.flip-x.flip-y.new { transform-origin: 100% 0; }
+    .note-card.leaving { animation: note-out .12s ease-in forwards; pointer-events: none; }
+    @keyframes note-in { from { opacity: 0; transform: scale(.9); } }
+    @keyframes note-out { to { opacity: 0; transform: scale(.94); } }
+
+    .note-tools {
+      position: fixed; display: flex; align-items: center; gap: 1px; padding: 4px;
+      background: #1f1f24; color: #eee; border-radius: 10px; user-select: none;
+      box-shadow: 0 6px 20px rgba(0,0,0,.25); font: 13px/1 system-ui, sans-serif;
+    }
+    .note-tools[hidden] { display: none; }
+    .note-tools button {
+      all: unset; box-sizing: border-box; height: 26px; min-width: 26px; padding: 0 5px;
+      display: inline-flex; align-items: center; justify-content: center; border-radius: 6px; cursor: pointer;
+    }
+    .note-tools button:hover { background: rgba(255,255,255,.12); }
+    .note-tools button[aria-pressed="true"] { background: #5f3dc4; }
+    .note-tools button.color { min-width: 22px; padding: 0; }
+    .note-tools button.color[aria-pressed="true"] { background: none; box-shadow: inset 0 0 0 2px #fff; }
+    .note-tools .swatch { width: 14px; height: 14px; }
+    .note-tools .size { min-width: 20px; text-align: center; font-variant-numeric: tabular-nums; opacity: .8; }
+    .note-tools .sep { height: 16px; margin: 0 3px; }
+    .note-tools.editing [data-note="edit"], .note-tools.editing [data-note="edit"] + .sep { display: none; }
+    .note-tools svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     .toolbar {
       position: fixed; top: 12px; left: 50%; transform: translateX(-50%);
@@ -117,7 +146,8 @@
     .toast[hidden] { display: none; }
     .toast button { all: unset; cursor: pointer; color: #b197fc; font-weight: 600; }
     :host(.capturing) .toolbar, :host(.capturing) .hints, :host(.capturing) .selection,
-    :host(.capturing) .toast, :host(.capturing) .frame { display: none !important; }
+    :host(.capturing) .toast, :host(.capturing) .frame, :host(.capturing) .note-tools,
+    :host(.capturing) .note-card.leaving { display: none !important; }
   `;
 
   const state = {
@@ -135,9 +165,10 @@
     skipClick: false,
     dirty: false,
     saving: false,
+    noteFont: { ...DEFAULT_FONT }, // font for new comments: the last one picked in this session
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
-  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, toastEl, toastTimer;
+  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, noteTools, toastEl, toastTimer;
 
   // ---------- lifecycle ----------
 
@@ -155,6 +186,7 @@
       <div class="frame"></div>
       <div class="hints"></div>
       <div class="toolbar" role="toolbar"></div>
+      <div class="note-tools" role="toolbar" hidden></div>
       <div class="toast" hidden></div>
     `;
     stage = shadow.querySelector('.stage');
@@ -165,8 +197,10 @@
     notesLayer = shadow.querySelector('.notes');
     hintsEl = shadow.querySelector('.hints');
     toolbar = shadow.querySelector('.toolbar');
+    noteTools = shadow.querySelector('.note-tools');
     toastEl = shadow.querySelector('.toast');
     buildToolbar();
+    buildNoteTools();
 
     stage.addEventListener('pointerdown', onPointerDown);
     stage.addEventListener('pointermove', onPointerMove);
@@ -178,7 +212,7 @@
     host.addEventListener('touchmove', preventDefault, { passive: false });
     window.addEventListener('keydown', onKeyDown, true);
 
-    Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false });
+    Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT } });
     nodes.clear();
     document.documentElement.appendChild(host);
     setTool(state.tool);
@@ -349,8 +383,9 @@
       if (hit) removeShape(hit);
       return;
     }
-    // Anything can be dragged with the Select tool; comment cards with any tool but Comment.
-    if (hit && (state.tool === 'select' || (hit.type === 'text' && state.tool !== 'text'))) {
+    // Anything can be dragged with the Select tool; comment cards with any tool
+    // (with the Comment tool, a click without dragging edits the comment).
+    if (hit && (state.tool === 'select' || hit.type === 'text')) {
       select(hit.id);
       state.drag = { shape: hit, x, y, moved: false };
       stage.setPointerCapture(e.pointerId);
@@ -380,9 +415,8 @@
         pushHistory();
         drag.moved = true;
       }
-      translate(drag.shape, x - drag.x, y - drag.y);
+      move(drag.shape, x - drag.x, y - drag.y);
       Object.assign(drag, { x, y });
-      renderShape(drag.shape);
       renderSelection();
       return;
     }
@@ -450,6 +484,11 @@
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
   }
 
+  function move(s, dx, dy) {
+    translate(s, dx, dy);
+    renderShape(s);
+  }
+
   function select(id) {
     state.selected = id;
     renderSelection();
@@ -488,13 +527,16 @@
 
   // A Figma-style comment: avatar pin + card, whose sharp corner sits on the clicked spot.
   function openNoteEditor(existing, ax, ay) {
-    const shape = existing ? { ...existing } : { id: uid(), type: 'text', ax, ay, text: '' };
+    const shape = existing
+      ? { ...existing, font: normalizeFont(existing.font) }
+      : { id: uid(), type: 'text', ax, ay, text: '', font: { ...state.noteFont } };
     if (existing) {
       nodes.get(existing.id)?.remove();
       nodes.delete(existing.id);
     }
     select(null);
     const el = noteCard(shape, true);
+    if (!existing) el.classList.add('new');
     const ta = el.querySelector('textarea');
     ta.value = shape.text;
     notesLayer.appendChild(el);
@@ -503,7 +545,10 @@
     for (const type of ['keydown', 'keyup', 'keypress']) {
       ta.addEventListener(type, (e) => e.stopPropagation());
     }
-    ta.addEventListener('input', () => placeNote(el, shape));
+    ta.addEventListener('input', () => {
+      placeNote(el, shape);
+      updateNoteTools();
+    });
     ta.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -515,6 +560,7 @@
     });
     ta.addEventListener('blur', () => commitText());
     state.textInput = { el, ta, shape, original: existing };
+    updateNoteTools();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
   }
@@ -523,19 +569,25 @@
     const edit = state.textInput;
     if (!edit) return;
     state.textInput = null;
-    edit.el.remove();
-    const { shape, original } = edit;
+    const { el, shape, original } = edit;
     const text = edit.ta.value.trim();
-    const unchanged = original && text === original.text;
+    const unchanged = original && text === original.text && sameFont(original.font, shape.font);
     if (cancel || unchanged || (!original && !text)) {
-      if (original) renderShape(original);
+      if (original) {
+        el.remove();
+        renderShape(original);
+      } else {
+        dismiss(el);
+      }
+      updateNoteTools();
       return;
     }
+    el.remove();
     pushHistory();
     if (original && !text) {
       state.shapes = state.shapes.filter((s) => s !== original);
     } else if (original) {
-      original.text = text;
+      Object.assign(original, { text, font: shape.font });
       renderShape(original);
     } else {
       shape.text = text;
@@ -543,6 +595,121 @@
       renderShape(shape);
     }
     state.dirty = true;
+    updateNoteTools();
+  }
+
+  // A cancelled new comment fades out instead of vanishing.
+  function dismiss(el) {
+    el.classList.remove('new');
+    el.classList.add('leaving');
+    el.querySelector('textarea')?.blur();
+    setTimeout(() => el.remove(), 150);
+  }
+
+  function sameFont(a, b) {
+    return JSON.stringify(normalizeFont(a)) === JSON.stringify(normalizeFont(b));
+  }
+
+  // Wider cards for bigger text, so a large comment doesn't wrap every other word.
+  function noteMaxWidth(font) {
+    return NOTE_MAX_W + Math.max(0, normalizeFont(font).size - DEFAULT_FONT.size) * 12;
+  }
+
+  // ---------- comment tools (popover over the selected or edited comment) ----------
+
+  const FAMILY_NAMES = { sans: 'Sans', serif: 'Serif', mono: 'Mono' };
+
+  function buildNoteTools() {
+    const parts = [`<button data-note="edit" title="Edit (Enter)">${icon('edit')}</button><span class="sep"></span>`];
+    for (const [f, name] of Object.entries(FAMILY_NAMES)) parts.push(`<button data-family="${f}" title="${name}">Aa</button>`);
+    parts.push('<span class="sep"></span>');
+    parts.push('<button data-size="-1" title="Smaller">−</button><span class="size"></span><button data-size="1" title="Larger">+</button>');
+    parts.push('<button data-note="bold" title="Bold"><b>B</b></button>');
+    parts.push('<span class="sep"></span>');
+    for (const c of COLORS) {
+      parts.push(`<button class="color" data-note-color="${c}" title="Text color"><span class="swatch" style="background:${c}"></span></button>`);
+    }
+    parts.push('<span class="sep"></span>');
+    parts.push(`<button data-note="delete" title="Delete (Del)">${icon('clear')}</button>`);
+    noteTools.innerHTML = parts.join('');
+    for (const b of noteTools.querySelectorAll('[data-family]')) b.style.fontFamily = globalThis.PageReviewNotes.FAMILIES[b.dataset.family];
+    // Clicking a tool must not take the focus from the comment being typed.
+    noteTools.addEventListener('mousedown', preventDefault);
+    noteTools.addEventListener('click', (e) => {
+      const btn = e.target.closest('button');
+      const s = noteToolsTarget();
+      if (!btn || !s) return;
+      const d = btn.dataset;
+      const font = normalizeFont(s.font);
+      if (d.note === 'edit') openNoteEditor(s);
+      else if (d.note === 'delete') deleteNote(s);
+      else if (d.family) setNoteFont(s, { family: d.family });
+      else if (d.size) setNoteFont(s, { size: stepSize(font.size, Number(d.size)) });
+      else if (d.note === 'bold') setNoteFont(s, { weight: font.weight === 700 ? 400 : 700 });
+      else if (d.noteColor) setNoteFont(s, { color: d.noteColor });
+    });
+  }
+
+  function noteToolsTarget() {
+    if (state.textInput) return state.textInput.shape;
+    const sel = selectedShape();
+    return sel?.type === 'text' ? sel : null;
+  }
+
+  function updateNoteTools() {
+    if (!noteTools) return;
+    const s = noteToolsTarget();
+    const card = s && (state.textInput?.el ?? nodes.get(s.id));
+    noteTools.hidden = !card;
+    if (!card) return;
+    const f = normalizeFont(s.font);
+    noteTools.classList.toggle('editing', !!state.textInput);
+    for (const b of noteTools.querySelectorAll('[data-family]')) b.setAttribute('aria-pressed', String(b.dataset.family === f.family));
+    for (const b of noteTools.querySelectorAll('[data-note-color]')) b.setAttribute('aria-pressed', String(b.dataset.noteColor === f.color));
+    noteTools.querySelector('[data-note="bold"]').setAttribute('aria-pressed', String(f.weight === 700));
+    noteTools.querySelector('.size').textContent = String(f.size);
+    // On the side of the card away from its pin (so it doesn't cover what the pin points at),
+    // or the other side when there's no room.
+    const r = card.getBoundingClientRect();
+    const t = noteTools.getBoundingClientRect();
+    const above = r.top - t.height - 8;
+    const below = r.bottom + 8;
+    const pinOnTop = card.classList.contains('flip-y');
+    const fitsBelow = below + t.height <= innerHeight - EDGE_PX;
+    const top = (pinOnTop && fitsBelow) || above < EDGE_PX ? below : above;
+    noteTools.style.left = `${clamp(r.left, EDGE_PX, innerWidth - t.width - EDGE_PX)}px`;
+    noteTools.style.top = `${top}px`;
+  }
+
+  // The picked font also becomes the font for new comments, until the overlay closes.
+  function setNoteFont(s, patch) {
+    const font = normalizeFont({ ...normalizeFont(s.font), ...patch });
+    state.noteFont = font;
+    if (state.textInput) {
+      const { el, shape } = state.textInput;
+      shape.font = font;
+      styleNoteBody(el, shape);
+      placeNote(el, shape);
+    } else {
+      pushHistory();
+      s.font = font;
+      renderShape(s);
+      state.dirty = true;
+    }
+    updateNoteTools();
+  }
+
+  function deleteNote(s) {
+    if (!state.textInput) return removeShape(s);
+    const { original } = state.textInput;
+    commitText({ cancel: true });
+    if (original) removeShape(original);
+  }
+
+  function styleNoteBody(el, s) {
+    const body = el.querySelector('textarea, .text');
+    Object.assign(body.style, noteCss(s.font), { maxWidth: `${noteMaxWidth(s.font) - 54}px` });
+    el.style.maxWidth = `${noteMaxWidth(s.font)}px`;
   }
 
   function noteCard(s, editing) {
@@ -562,6 +729,7 @@
       body.textContent = s.text;
     }
     el.append(avatar, body);
+    styleNoteBody(el, s);
     return el;
   }
 
@@ -570,7 +738,7 @@
     const vw = host.clientWidth || innerWidth;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const flipX = s.ax + NOTE_MAX_W > vw - EDGE_PX;
+    const flipX = s.ax + noteMaxWidth(s.font) > vw - EDGE_PX;
     const flipY = s.ay - h < EDGE_PX;
     el.classList.toggle('flip-x', flipX);
     el.classList.toggle('flip-y', flipY);
@@ -604,6 +772,7 @@
       let el = nodes.get(s.id);
       if (el) {
         el.querySelector('.text').textContent = s.text;
+        styleNoteBody(el, s);
       } else {
         el = noteCard(s, false);
         notesLayer.appendChild(el);
@@ -638,6 +807,7 @@
   function renderSelection() {
     selectionLayer.replaceChildren();
     for (const el of notesLayer.querySelectorAll('.note-card.selected')) el.classList.remove('selected');
+    updateNoteTools();
     const s = selectedShape();
     if (!s) return;
     if (s.type === 'text') {
@@ -1078,8 +1248,7 @@
     else if (sel && NUDGE[e.key]) {
       const step = e.shiftKey ? 10 : 1;
       pushHistory();
-      translate(sel, NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
-      renderShape(sel);
+      move(sel, NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
       renderSelection();
       state.dirty = true;
     } else if (sel && plain && e.key === 'Enter' && sel.type === 'text') openNoteEditor(sel);

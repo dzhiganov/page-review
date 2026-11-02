@@ -34,7 +34,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Colors | **1–5** (also recolors the selected drawing) |
 | Move | Select tool → drag. Comments can be dragged with any tool. Arrow keys nudge (Shift = 10px) |
 | Delete | Select → **Delete**/Backspace, or the eraser |
-| Edit a comment | Double-click it |
+| Edit a comment | Double-click it, or click it and use the bar next to it (text, font, size, bold, color, delete) |
 | Undo / redo | **Ctrl/Cmd+Z** · **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** (any keyboard layout) |
 | Save | **Ctrl/Cmd+S** |
 | Exit | **Esc** (the first Esc deselects) |
