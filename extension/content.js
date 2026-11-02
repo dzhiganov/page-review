@@ -7,6 +7,8 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
+  const { recognize } = globalThis.PageReviewSmooth;
+  const PREFS_KEY = 'editorPrefs';
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -128,6 +130,9 @@
     .toolbar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .toolbar .grip { cursor: grab; min-width: 20px; padding: 0; opacity: .6; }
     .toolbar .grip svg { fill: currentColor; stroke: none; }
+    .toolbar label.smooth { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px 0 6px; height: 32px; cursor: pointer; opacity: .85; }
+    .toolbar label.smooth:hover { opacity: 1; }
+    .toolbar label.smooth input { margin: 0; accent-color: #845ef7; cursor: pointer; }
     .sep { width: 1px; height: 20px; background: rgba(255,255,255,.18); margin: 0 4px; }
     .swatch { width: 18px; height: 18px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
     .toolbar button.color { min-width: 26px; padding: 0; }
@@ -165,6 +170,7 @@
     skipClick: false,
     dirty: false,
     saving: false,
+    smooth: false, // clean up freehand strokes (remembered in editorPrefs)
     noteFont: { ...DEFAULT_FONT }, // font for new comments: the last one picked in this session
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
@@ -201,6 +207,7 @@
     toastEl = shadow.querySelector('.toast');
     buildToolbar();
     buildNoteTools();
+    loadPrefs();
 
     stage.addEventListener('pointerdown', onPointerDown);
     stage.addEventListener('pointermove', onPointerMove);
@@ -244,6 +251,7 @@
     for (const t of TOOLS) {
       parts.push(`<button data-tool="${t.id}" title="${t.title}">${icon(t.id)}</button>`);
     }
+    parts.push('<label class="smooth" title="Straighten lines and clean up freehand strokes"><input type="checkbox">Smooth</label>');
     parts.push('<span class="sep"></span>');
     COLORS.forEach((c, i) => {
       parts.push(
@@ -272,8 +280,25 @@
       else if (action === 'save') save();
       else if (action === 'close') close();
     });
+    toolbar.querySelector('.smooth input').addEventListener('change', (e) => {
+      state.smooth = e.target.checked;
+      savePrefs();
+    });
     enableToolbarDrag(toolbar.querySelector('.grip'));
     setColor(state.color);
+  }
+
+  // Editor preferences live in their own storage key, apart from `settings`.
+  async function loadPrefs() {
+    try {
+      const { [PREFS_KEY]: prefs } = await chrome.storage.local.get(PREFS_KEY);
+      state.smooth = prefs?.smooth === true;
+    } catch {} // storage unavailable: defaults
+    if (toolbar) toolbar.querySelector('.smooth input').checked = state.smooth;
+  }
+
+  function savePrefs() {
+    chrome.storage.local.set({ [PREFS_KEY]: { smooth: state.smooth } }).catch(() => {});
   }
 
   function enableToolbarDrag(grip) {
@@ -460,13 +485,27 @@
     if (tooSmall) return;
     delete s.ox;
     delete s.oy;
-    addShape(s);
-    showHint(s);
+    const shape = s.type === 'pen' && state.smooth ? smoothed(s) : s;
+    addShape(shape);
+    showHint(shape);
     // An arrow or a box is almost always followed by a comment about it: start one right away.
-    if (s.type === 'arrow' || s.type === 'rect') {
-      const [ax, ay] = s.type === 'arrow' ? [s.x1, s.y1] : [s.x + s.w, s.y];
-      openNoteEditor(null, ax, ay, s.id);
+    if (shape.type === 'arrow' || shape.type === 'rect') {
+      const [ax, ay] = shape.type === 'arrow' ? [shape.x1, shape.y1] : [shape.x + shape.w, shape.y];
+      openNoteEditor(null, ax, ay, shape.id);
     }
+  }
+
+  // A pen stroke after recognition: a straight line, arrow, box, ellipse or smooth curve.
+  function smoothed(s) {
+    const r = recognize(s.points);
+    if (!r) return s;
+    const { id, color } = s;
+    if (r.type === 'arrow') {
+      const { x1, y1, x2, y2, cx, cy } = r;
+      return { id, type: 'arrow', color, x1, y1, x2, y2, ...(cx === undefined ? {} : { cx, cy }) };
+    }
+    if (r.type === 'rect') return { id, type: 'rect', color, x: r.x, y: r.y, w: r.w, h: r.h };
+    return { ...s, points: r.points };
   }
 
   function onStageClick(e) {
@@ -487,7 +526,10 @@
 
   function translate(s, dx, dy) {
     if (s.type === 'pen') s.points = s.points.map(([px, py]) => [px + dx, py + dy]);
-    else if (s.type === 'arrow') Object.assign(s, { x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy });
+    else if (s.type === 'arrow') {
+      Object.assign(s, { x1: s.x1 + dx, y1: s.y1 + dy, x2: s.x2 + dx, y2: s.y2 + dy });
+      if (isCurved(s)) Object.assign(s, { cx: s.cx + dx, cy: s.cy + dy });
+    }
     else if (s.type === 'rect') Object.assign(s, { x: s.x + dx, y: s.y + dy });
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
   }
@@ -503,6 +545,10 @@
         renderShape(note);
       }
     }
+  }
+
+  function isCurved(s) {
+    return Number.isFinite(s.cx) && Number.isFinite(s.cy);
   }
 
   function select(id) {
@@ -860,23 +906,36 @@
     return `${d} L${last[0]} ${last[1]}`;
   }
 
-  function arrowPath({ x1, y1, x2, y2 }) {
-    const angle = Math.atan2(y2 - y1, x2 - x1);
+  // Straight, or a quadratic curve when the arrow has a control point (cx, cy).
+  function arrowPath(s) {
+    const { x1, y1, x2, y2 } = s;
+    const curved = isCurved(s);
+    const angle = curved ? Math.atan2(y2 - s.cy, x2 - s.cx) : Math.atan2(y2 - y1, x2 - x1);
     const head = Math.min(18, Math.hypot(x2 - x1, y2 - y1) * 0.4);
     const ax = (a) => x2 - head * Math.cos(angle + a);
     const ay = (a) => y2 - head * Math.sin(angle + a);
-    return `M${x1} ${y1} L${x2} ${y2} M${ax(0.45)} ${ay(0.45)} L${x2} ${y2} L${ax(-0.45)} ${ay(-0.45)}`;
+    const shaft = curved ? `M${x1} ${y1} Q${s.cx} ${s.cy} ${x2} ${y2}` : `M${x1} ${y1} L${x2} ${y2}`;
+    return `${shaft} M${ax(0.45)} ${ay(0.45)} L${x2} ${y2} L${ax(-0.45)} ${ay(-0.45)}`;
+  }
+
+  function curvePoints(s, n = 16) {
+    return Array.from({ length: n + 1 }, (_, i) => {
+      const t = i / n;
+      const u = 1 - t;
+      return [u * u * s.x1 + 2 * u * t * s.cx + t * t * s.x2, u * u * s.y1 + 2 * u * t * s.cy + t * t * s.y2];
+    });
   }
 
   // ---------- linking drawings to DOM elements ----------
 
   function boxOf(s) {
     if (s.type === 'rect' || s.type === 'text') return { x: s.x, y: s.y, w: s.w, h: s.h };
-    if (s.type === 'arrow') {
+    if (s.type === 'arrow' && !isCurved(s)) {
       return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
     }
-    const xs = s.points.map((p) => p[0]);
-    const ys = s.points.map((p) => p[1]);
+    const points = s.type === 'arrow' ? curvePoints(s) : s.points;
+    const xs = points.map((p) => p[0]);
+    const ys = points.map((p) => p[1]);
     const x = Math.min(...xs);
     const y = Math.min(...ys);
     return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
@@ -930,7 +989,8 @@
   }
 
   function arrowTarget(mark, reversed) {
-    const [fx, fy, tx, ty] = reversed ? [mark.x2, mark.y2, mark.x1, mark.y1] : [mark.x1, mark.y1, mark.x2, mark.y2];
+    let [fx, fy, tx, ty] = reversed ? [mark.x2, mark.y2, mark.x1, mark.y1] : [mark.x1, mark.y1, mark.x2, mark.y2];
+    if (isCurved(mark)) [fx, fy] = [mark.cx, mark.cy]; // a curve arrives along its last tangent
     const atTip = elementsAt(tx, ty)[0] ?? null;
     if (!atTip) return null;
     // Hand-drawn arrows tend to stop just short of what they point at. If the tip is on a
