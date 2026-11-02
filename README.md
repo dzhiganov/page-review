@@ -51,7 +51,29 @@ Reviews are grouped by day (Today, Yesterday, …). Each card has:
   position, computed styles, HTML snippet), numbered to match the screenshot.
   Paste both into an AI agent and ask it to fix the page.
 
-Click a screenshot to see it full size.
+Click a screenshot to see it full size. The download button saves the image as a PNG.
+
+### Combine screenshots
+
+Drag one screenshot onto another, or tick 2 to 4 cards and press **Combine**, to make a
+new image from them with a template: Before / After, Expected / Actual, Desktop / Mobile,
+Light / Dark, Step 1 → 2 → 3 (3 images) or a 2×2 grid (4 images). Labels, label position
+and style, the background, padding and what goes between the images (arrow, divider) can
+be changed, and saved as your own template. The new image is a card like any other.
+
+### Settings
+
+Open **Settings** on the reviews page.
+
+- **Avatar**: an image (upload or URL) shown on your comment cards.
+- **Storage**: reviews always stay in the browser. They can also be written as files:
+  - **Downloads folder**: Chrome writes each review to `Downloads/<folder>/reviews/<id>/`.
+  - **Local server**: sent to `npm run serve` (or the MCP server in Claude Code), which
+    writes `~/.page-review/reviews/<id>/` and lets the agent mark comments as resolved.
+
+  Both write `screenshot.png`, `review.json` and `review.md` per review.
+- **AI agent**: a Claude Code skill (`SKILL.md`) or a plain prompt that tells your agent
+  where the reviews are and how to read them. Copy or download it.
 
 ![The reviews page: saved reviews grouped by day, each with Copy as image and Copy as Markdown](docs/screenshots/reviews.png)
 
@@ -91,7 +113,7 @@ After each mark, a dashed outline briefly shows which element it picked.
 
 ```bash
 npm install
-npm test          # headless Chromium: loads the extension, draws, saves, checks the reviews page
+npm test          # unit tests, then headless Chromium: loads the extension, draws, saves, checks the reviews page
 npm run icons     # regenerate extension/icons/
 npm run screenshots  # regenerate docs/screenshots/ from the demo page in docs/demo/
 ```
