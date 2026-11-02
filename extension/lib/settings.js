@@ -28,7 +28,8 @@ export async function updateSettings(patch) {
 export function normalizeSettings(raw) {
   const s = { ...DEFAULTS, ...(raw && typeof raw === 'object' ? raw : {}) };
   if (!STORAGE_MODES.includes(s.storage)) s.storage = DEFAULTS.storage;
-  s.downloadsFolder = cleanFolder(s.downloadsFolder) || DEFAULTS.downloadsFolder;
+  s.downloadsFolder = cleanFolder(s.downloadsFolder);
+  if (folderError(s.downloadsFolder)) s.downloadsFolder = DEFAULTS.downloadsFolder;
   if (typeof s.serverUrl !== 'string' || !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(s.serverUrl.replace(/\/+$/, ''))) {
     s.serverUrl = DEFAULTS.serverUrl;
   }
@@ -45,6 +46,22 @@ export function cleanFolder(value) {
     .map((part) => part.replace(/[<>:"|?*\x00-\x1f]/g, '').trim().replace(/^\.+$/, '').replace(/[. ]+$/, ''))
     .filter(Boolean)
     .join('/');
+}
+
+const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])$/i;
+const MAX_PART = 64;
+const MAX_FOLDER = 120;
+
+// Why a (cleaned) folder name can't be used, or null when it's fine.
+export function folderError(folder) {
+  if (!folder) return 'Enter a folder name.';
+  if (folder.length > MAX_FOLDER) return `Keep the folder path under ${MAX_FOLDER} characters.`;
+  for (const part of folder.split('/')) {
+    // Windows refuses these names even with an extension ("nul.txt").
+    if (RESERVED.test(part.split('.')[0])) return `"${part}" is a reserved name on Windows. Choose another one.`;
+    if (part.length > MAX_PART) return `Keep each folder name under ${MAX_PART} characters.`;
+  }
+  return null;
 }
 
 // Whether reviews go to the local server (the AGENT_SYNC flag still forces it on for tests).

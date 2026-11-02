@@ -1,7 +1,7 @@
 // Settings view: avatar, storage, and the instructions for an AI agent.
 import { agentInstructions } from './lib/agent.js';
 import { serverHealth } from './lib/server.js';
-import { getSettings, updateSettings } from './lib/settings.js';
+import { cleanFolder, folderError, getSettings, updateSettings } from './lib/settings.js';
 import { h, loadImage, saveFile, toast } from './ui.js';
 
 const AVATAR_PX = 128;
@@ -32,13 +32,19 @@ export async function initSettings() {
   $('avatarRemove').addEventListener('click', () => save({ avatar: null }));
 
   for (const radio of document.querySelectorAll('input[name="storage"]')) {
-    radio.addEventListener('change', () => save({ storage: radio.value }));
+    radio.addEventListener('change', () => {
+      storageError(null);
+      save({ storage: radio.value });
+    });
   }
-  $('downloadsFolder').addEventListener('change', () => save({ downloadsFolder: $('downloadsFolder').value }));
+  $('downloadsFolder').addEventListener('change', () => {
+    const folder = cleanFolder($('downloadsFolder').value);
+    if (!storageError(folderError(folder))) save({ downloadsFolder: folder });
+  });
   $('serverUrl').addEventListener('change', async () => {
     const wanted = $('serverUrl').value.trim().replace(/\/+$/, '');
-    const next = await save({ serverUrl: wanted });
-    if (next.serverUrl !== wanted) toast('Only http://localhost or http://127.0.0.1 addresses work.');
+    const ok = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(wanted);
+    if (!storageError(ok ? null : 'Only http://localhost or http://127.0.0.1 addresses work.')) save({ serverUrl: wanted });
   });
 
   for (const radio of document.querySelectorAll('input[name="agentFormat"]')) radio.addEventListener('change', renderAgent);
@@ -56,6 +62,13 @@ export async function initSettings() {
     if (changes.settings || changes.downloadsRoot) load();
   });
   await load();
+}
+
+// Shows (or clears) a problem with a storage field; returns whether there is one.
+function storageError(message) {
+  $('storageError').textContent = message ?? '';
+  $('storageError').hidden = !message;
+  return Boolean(message);
 }
 
 async function save(patch) {
