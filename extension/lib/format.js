@@ -9,6 +9,7 @@ const KIND_LABEL = {
 
 // `screenshot` is the image's file path, or null when the image is shared separately.
 export function toMarkdown(review, screenshot = null) {
+  if (review.composite) return compositeMarkdown(review, screenshot);
   const { viewport: vp } = review;
   const out = [];
   out.push(`# Page review: ${review.title || review.url}`, '');
@@ -53,5 +54,30 @@ export function toMarkdown(review, screenshot = null) {
     if (styles) out.push(`- **Computed styles:** ${styles}`);
     out.push('', '````html', t.html, '````', '');
   }
+  return out.join('\n');
+}
+
+// A combined image (made on the reviews page from several reviews with a template).
+function compositeMarkdown(review, screenshot) {
+  const { composite } = review;
+  const order = composite.sources.length === 4 ? 'left to right, top to bottom' : 'left to right';
+  const out = [`# Combined image: ${review.title}`, ''];
+  out.push(`- **Made from:** ${composite.sources.length} reviews, ${composite.layout} (${order})`);
+  out.push(`- **Created:** ${new Date(review.createdAt).toLocaleString()}`);
+  out.push(
+    `- **Image:** ${screenshot ? `\`${screenshot}\`` : 'the combined image, shared separately'}. ` +
+      "Each panel is an annotated screenshot; the numbered badges in a panel match that panel's comments below.",
+  );
+  out.push('');
+  composite.sources.forEach((s, i) => {
+    out.push(`## Panel ${i + 1}${s.label ? `: ${s.label}` : ''}`, '');
+    if (s.url) out.push(`- **Page:** ${s.title ? `${s.title}, ` : ''}${s.url}`);
+    if (s.createdAt) out.push(`- **Captured:** ${new Date(s.createdAt).toLocaleString()}`);
+    out.push(`- **Review id:** ${s.id}`);
+    for (const c of s.comments) {
+      out.push(`- **#${c.n}:** ${c.text ? c.text.replace(/\n/g, ' ') : '_(drawing only, no text)_'}${c.selector ? ` (\`${c.selector}\`)` : ''}`);
+    }
+    out.push('');
+  });
   return out.join('\n');
 }
