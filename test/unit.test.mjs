@@ -26,8 +26,8 @@ globalThis.chrome = {
 const { layoutComposition, compositeReview, luminance } = await import('../extension/lib/compose.js');
 const templates = await import('../extension/lib/templates.js');
 const settings = await import('../extension/lib/settings.js');
-const { agentInstructions, wslPath } = await import('../extension/lib/agent.js');
-const { rootOf, reviewPaths, storedReview } = await import('../extension/lib/storage.js');
+const { agentInstructions, code, wslPath } = await import('../extension/lib/agent.js');
+const { removeExport, rootOf, reviewPaths, storedReview, updateDownloaded } = await import('../extension/lib/storage.js');
 const { toMarkdown } = await import('../extension/lib/format.js');
 
 const { BUILT_IN_TEMPLATES, normalizeTemplate } = templates;
@@ -222,6 +222,18 @@ describe('settings', () => {
     assert.equal(settings.normalizeSettings({ downloadsFolder: '..' }).downloadsFolder, 'page-review');
   });
 
+  test('Windows-reserved and overlong folder names are refused', async () => {
+    for (const bad of ['con', 'reviews/NUL', 'aux.txt', 'a/com1/b', 'LPT9', 'x'.repeat(65), `${'abc/'.repeat(40)}x`]) {
+      assert.ok(settings.folderError(bad), bad);
+    }
+    for (const good of ['page-review', 'console', 'com10', 'Page Review/shots', 'x'.repeat(64)]) {
+      assert.equal(settings.folderError(good), null, good);
+    }
+    assert.ok(settings.folderError(''));
+    const s = await settings.updateSettings({ downloadsFolder: 'reviews/con' });
+    assert.equal(s.downloadsFolder, 'page-review', 'never stored');
+  });
+
   test('server sync follows the setting or the flag', () => {
     assert.equal(settings.sendsToServer({ storage: 'server' }), true);
     assert.equal(settings.sendsToServer({ storage: 'downloads' }), false);
@@ -290,6 +302,39 @@ describe('combined item', () => {
   });
 });
 
+describe('exports', () => {
+  test('deleting removes the server copy even after switching away from server mode', async () => {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init = {}) => {
+      calls.push(`${init.method ?? 'GET'} ${url}`);
+      return new Response('{"ok":true}', { headers: { 'content-type': 'application/json' } });
+    };
+    try {
+      store.settings = { storage: 'browser' };
+      store.synced = { 'mx1-aaaa': '2026-11-02T10:00:00Z', 'mx2-bbbb': '2026-11-02T10:00:00Z' };
+      await removeExport('mx1-aaaa');
+      assert.deepEqual(calls, [`DELETE ${settings.DEFAULT_SERVER_URL}/reviews/mx1-aaaa`]);
+      assert.deepEqual(Object.keys(store.synced), ['mx2-bbbb'], 'synced entry cleared');
+      await removeExport('mx3-never-sent');
+      assert.equal(calls.length, 1, 'nothing to delete for a review that was never sent');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  test('concurrent updates of the downloads bookkeeping are not lost', async () => {
+    await Promise.all(
+      Array.from({ length: 5 }, (_, i) =>
+        updateDownloaded((d) => {
+          d[`id-${i}`] = { folder: 'f', ids: [i] };
+        }),
+      ),
+    );
+    assert.deepEqual(Object.keys(store.downloaded).sort(), ['id-0', 'id-1', 'id-2', 'id-3', 'id-4']);
+  });
+});
+
 describe('agent instructions', () => {
   test('skill format: frontmatter, then where the files are', () => {
     const md = agentInstructions({ format: 'skill', storage: 'downloads', root: '/home/u/Downloads/page-review' });
@@ -317,6 +362,23 @@ describe('agent instructions', () => {
     const md = agentInstructions({ storage: 'server', root: '/home/u/.page-review' });
     assert.match(md, /`\/home\/u\/.page-review\/reviews`/);
     assert.match(md, /set_comment_status/);
+  });
+
+  test('backticks in paths stay valid Markdown', () => {
+    assert.equal(code('plain'), '`plain`');
+    assert.equal(code('a`b'), '`` a`b ``');
+    assert.equal(code('a``b'), '``` a``b ```');
+    const md = agentInstructions({ storage: 'downloads', rootGuess: '~/Downloads/we`ird', folder: 'we`ird' });
+    assert.match(md, /`` ~\/Downloads\/we`ird\/reviews ``/);
+    assert.match(md, /look for the `` we`ird `` folder/);
+  });
+
+  test('combined images: go by the labels, sources may be gone', () => {
+    const md = agentInstructions({ storage: 'server', root: '/r' });
+    assert.match(md, /Go by the labels/);
+    assert.match(md, /the user's comments say what to change/);
+    assert.match(md, /may have been deleted/);
+    assert.doesNotMatch(md, /first panel is the reference/);
   });
 
   test('browser only: ask the user to paste, no paths', () => {
