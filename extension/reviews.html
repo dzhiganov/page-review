@@ -10,8 +10,139 @@
     <header>
       <h1>Page Reviews</h1>
       <div id="server" class="server" hidden></div>
+      <nav class="tabs">
+        <a href="#" data-view="reviews">Reviews</a>
+        <a href="#settings" data-view="settings">Settings</a>
+      </nav>
     </header>
     <main id="list"></main>
+
+    <main id="settings" hidden>
+      <section class="panel">
+        <h2>Avatar</h2>
+        <p class="hint">Shown on your comment cards.</p>
+        <div class="avatar-row">
+          <div id="avatarPreview" class="avatar-preview"></div>
+          <button type="button" id="avatarUpload">Upload image</button>
+          <button type="button" id="avatarRemove" hidden>Remove</button>
+          <input type="file" id="avatarFile" accept="image/*" hidden />
+        </div>
+        <form id="avatarUrlForm" class="inline-form">
+          <input type="url" id="avatarUrl" placeholder="Or paste an image URL" />
+          <button type="submit">Use URL</button>
+        </form>
+        <p id="avatarError" class="error" hidden></p>
+      </section>
+
+      <section class="panel">
+        <h2>Storage</h2>
+        <p class="hint">Reviews are always kept in this browser. You can also save them as files your agent can read.</p>
+        <div class="options" id="storageOptions">
+          <label class="option">
+            <input type="radio" name="storage" value="browser" />
+            <span><strong>Browser only</strong><span class="hint">Copy reviews from this page when you need them.</span></span>
+          </label>
+          <label class="option">
+            <input type="radio" name="storage" value="downloads" />
+            <span>
+              <strong>Downloads folder</strong>
+              <span class="hint">Chrome writes each review to a folder inside Downloads.</span>
+            </span>
+          </label>
+          <div class="option-detail" data-for="downloads">
+            <label>Folder in Downloads <input type="text" id="downloadsFolder" spellcheck="false" /></label>
+          </div>
+          <label class="option">
+            <input type="radio" name="storage" value="server" />
+            <span>
+              <strong>Local server</strong>
+              <span class="hint">Sends each review to the page-review server (<code>npm run serve</code>, or the MCP server in Claude Code), which saves the files and lets your agent mark comments as resolved.</span>
+            </span>
+          </label>
+          <div class="option-detail" data-for="server">
+            <label>Server URL <input type="text" id="serverUrl" spellcheck="false" /></label>
+          </div>
+        </div>
+        <p id="storageStatus" class="status"></p>
+      </section>
+
+      <section class="panel">
+        <h2>AI agent</h2>
+        <p class="hint">Give this to your agent (Claude Code or similar) so it knows where your reviews are and how to read them.</p>
+        <div class="segmented" role="radiogroup" aria-label="Format">
+          <label><input type="radio" name="agentFormat" value="skill" checked /> Skill</label>
+          <label><input type="radio" name="agentFormat" value="prompt" /> Prompt</label>
+        </div>
+        <p id="agentWhere" class="hint"></p>
+        <pre id="agentText" class="agent-text"></pre>
+        <div class="actions-row">
+          <button type="button" id="agentCopy">Copy</button>
+          <button type="button" id="agentDownload">Download</button>
+        </div>
+      </section>
+    </main>
+
+    <div id="selection" class="selection-bar" hidden>
+      <span id="selectionCount"></span>
+      <button type="button" id="combine" class="primary">Combine</button>
+      <button type="button" id="clearSelection">Clear</button>
+    </div>
+
+    <dialog id="compose" class="compose" aria-labelledby="composeTitle">
+      <div class="compose-preview"><canvas id="composeCanvas"></canvas></div>
+      <form class="compose-side" id="composeForm" method="dialog">
+        <h2 id="composeTitle">Combine</h2>
+        <label class="field">Template <select id="tplSelect"></select></label>
+        <div class="field">
+          <span>Images and labels</span>
+          <ol id="composeSlots" class="slots"></ol>
+        </div>
+        <div class="field-row">
+          <label class="field">Position
+            <select id="labelPosition">
+              <option value="above">Above</option>
+              <option value="below">Below</option>
+              <option value="inside-top">On image, top</option>
+              <option value="inside-bottom">On image, bottom</option>
+              <option value="none">No labels</option>
+            </select>
+          </label>
+          <label class="field">Style
+            <select id="labelStyle">
+              <option value="pill">Pill</option>
+              <option value="text">Text</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="field">Between images
+            <select id="connector">
+              <option value="none">Nothing</option>
+              <option value="arrow">Arrow</option>
+              <option value="divider">Divider</option>
+            </select>
+          </label>
+          <label class="field">Padding <input type="range" id="padding" min="0" max="160" step="8" /></label>
+        </div>
+        <div class="field">
+          <span>Background</span>
+          <div class="bg-row">
+            <input type="color" id="background" aria-label="Background color" />
+            <label class="check"><input type="checkbox" id="gradient" /> Gradient to</label>
+            <input type="color" id="background2" aria-label="Gradient end color" />
+          </div>
+        </div>
+        <div class="tpl-actions">
+          <button type="button" id="tplSave">Save as template</button>
+          <button type="button" id="tplDelete" hidden>Delete template</button>
+        </div>
+        <footer>
+          <button type="button" id="composeCancel">Cancel</button>
+          <button type="button" id="composeCreate" class="primary">Create image</button>
+        </footer>
+      </form>
+    </dialog>
+
     <dialog id="lightbox"><img alt="Annotated screenshot" /></dialog>
     <div id="toast" hidden></div>
     <script type="module" src="reviews.js"></script>

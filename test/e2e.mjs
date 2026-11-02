@@ -327,6 +327,24 @@ try {
   assert.equal(far?.kind, 'box', 'far comment attached to the box drawn before it');
   assert.equal(far.target.text, 'API Layer');
 
+  // Combine: drag one screenshot onto another, create a Before / After image from them.
+  await reviewsPage.bringToFront();
+  await reviewsPage.reload();
+  const reviewCards = reviewsPage.locator('article.review');
+  await reviewCards.nth(1).waitFor();
+  const reviewCount = await reviewCards.count();
+  await reviewCards.nth(0).locator('.shot').dragTo(reviewCards.nth(1).locator('.shot'));
+  await reviewsPage.locator('dialog.compose[open]').waitFor();
+  assert.equal(await reviewsPage.locator('#tplSelect option:checked').textContent(), 'Before / After');
+  await reviewsPage.click('#composeCreate');
+  await reviewsPage.locator('#toast').filter({ hasText: 'Combined image created' }).waitFor();
+  await reviewsPage.locator('article.review .meta').filter({ hasText: 'Combined from 2 reviews' }).waitFor();
+  assert.equal(await reviewCards.count(), reviewCount + 1);
+  const combined = (await storedReviews()).find((r) => r.composite);
+  assert.deepEqual(combined.composite.sources.map((s) => s.label), ['Before', 'After']);
+  assert.ok(combined.composite.sources[0].createdAt <= combined.composite.sources[1].createdAt, 'older one is Before');
+  fs.writeFileSync(path.join(outDir, '5-combined.png'), Buffer.from(combined.screenshot.split(',')[1], 'base64'));
+
   console.log(`E2E OK (AGENT_SYNC=${AGENT}): see ${path.relative(root, outDir) || 'test/out'}/`);
 } finally {
   await context.close();

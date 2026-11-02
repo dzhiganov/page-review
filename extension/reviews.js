@@ -1,29 +1,56 @@
+import { openCompose } from './compose-ui.js';
 import { AGENT_SYNC } from './lib/flags.js';
 import { toMarkdown } from './lib/format.js';
-import { deleteRemote, fetchStatuses, pushReview, serverHealth } from './lib/server.js';
+import { fetchStatuses, pushReview, serverHealth } from './lib/server.js';
+import { getSettings, sendsToServer } from './lib/settings.js';
+import { removeExport } from './lib/storage.js';
+import { initSettings } from './settings-ui.js';
+import { button, h, saveFile, toast } from './ui.js';
 
 const list = document.getElementById('list');
+const settingsView = document.getElementById('settings');
 const lightbox = document.getElementById('lightbox');
 const serverEl = document.getElementById('server');
-const toastEl = document.getElementById('toast');
+const selectionBar = document.getElementById('selection');
 const POLL_MS = 5000;
 const TRASH = '<svg viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14h10l1-14"/></svg>';
-let toastTimer;
-let statuses = null; // agent sync only: Map id -> server summary, null when the server is offline
+const DOWNLOAD = '<svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/></svg>';
+const MAX_COMBINE = 4;
+let statuses = null; // server mode only: Map id -> server summary, null when the server is offline
+let serverMode = AGENT_SYNC;
 let lastSignature = '';
-const pushAttempted = new Set(); // agent sync only: auto-resend each review at most once per page load
+const pushAttempted = new Set(); // server mode only: auto-resend each review at most once per page load
 let refreshing = null;
 let queued = null;
+let reviewsById = new Map();
+let selected = []; // ids, in the order they were picked
+let dragId = null;
 
 init();
 
 function init() {
   lightbox.addEventListener('click', () => lightbox.close());
   chrome.storage.onChanged.addListener((changes) => {
-    if (Object.keys(changes).some((k) => k.startsWith('review:') || k === 'synced')) refresh(true);
+    if (Object.keys(changes).some((k) => k.startsWith('review:') || k === 'synced' || k === 'settings')) refresh(true);
   });
+  window.addEventListener('hashchange', showView);
+  document.getElementById('combine').addEventListener('click', () => combine(selected.map((id) => reviewsById.get(id))));
+  document.getElementById('clearSelection').addEventListener('click', () => setSelection([]));
+  showView();
+  initSettings();
   refresh(true);
-  if (AGENT_SYNC) setInterval(() => document.visibilityState === 'visible' && refresh(false), POLL_MS);
+  setInterval(() => serverMode && document.visibilityState === 'visible' && refresh(false), POLL_MS);
+}
+
+function showView() {
+  const settings = location.hash === '#settings';
+  list.hidden = settings;
+  settingsView.hidden = !settings;
+  serverEl.classList.toggle('off-view', settings);
+  for (const a of document.querySelectorAll('.tabs a')) {
+    a.toggleAttribute('aria-current', a.dataset.view === (settings ? 'settings' : 'reviews'));
+  }
+  updateSelectionBar();
 }
 
 // One refresh at a time; calls that arrive meanwhile collapse into one follow-up run.
@@ -45,7 +72,9 @@ function refresh(force) {
 
 async function doRefresh(force) {
   const reviews = await loadReviews();
-  if (AGENT_SYNC) {
+  serverMode = sendsToServer(await getSettings(), AGENT_SYNC);
+  serverEl.hidden = !serverMode;
+  if (serverMode) {
     const health = await serverHealth();
     renderServer(health);
     statuses = health ? await fetchStatuses() : null;
@@ -58,20 +87,24 @@ async function doRefresh(force) {
         return doRefresh(true);
       }
     }
+  } else {
+    statuses = null;
   }
   // Re-render only when something visible changed, so polling doesn't flicker.
   const signature = JSON.stringify([
     reviews.map((r) => r.id),
+    serverMode,
     statuses && [...statuses.values()].map((s) => s.open),
   ]);
   if (!force && signature === lastSignature) return;
   lastSignature = signature;
+  reviewsById = new Map(reviews.map((r) => [r.id, r]));
+  selected = selected.filter((id) => reviewsById.has(id));
   render(reviews);
 }
 
 function renderServer(health) {
-  serverEl.hidden = false;
-  serverEl.className = `server${health ? ' online' : ''}`;
+  serverEl.className = `server${health ? ' online' : ''}${location.hash === '#settings' ? ' off-view' : ''}`;
   serverEl.textContent = health ? 'Connected to Claude Code' : 'Claude Code not running';
 }
 
@@ -88,6 +121,7 @@ function render(reviews) {
     list.replaceChildren(
       h('p', { class: 'empty' }, 'No reviews yet. Open any page, click the Page Review icon (or Alt+Shift+R), draw, and Save.'),
     );
+    updateSelectionBar();
     return;
   }
   const groups = new Map();
@@ -102,6 +136,7 @@ function render(reviews) {
       h('div', { class: 'grid' }, ...items.map((r) => card(r, statuses?.get(r.id)))),
     ]),
   );
+  updateSelectionBar();
 }
 
 // "Today", "Yesterday", a weekday within the last week, then the date.
@@ -120,7 +155,7 @@ function dayLabel(date) {
 }
 
 function card(r, remote) {
-  const shot = h('button', { class: 'shot', title: 'View full size' }, h('img', { src: r.screenshot, alt: 'Annotated screenshot' }));
+  const shot = h('button', { class: 'shot', title: 'View full size', draggable: 'true' }, h('img', { src: r.screenshot, alt: 'Annotated screenshot' }));
   shot.addEventListener('click', () => {
     lightbox.querySelector('img').src = r.screenshot;
     lightbox.showModal();
@@ -131,30 +166,37 @@ function card(r, remote) {
     host = new URL(r.url).host || r.url;
   } catch {}
   const time = new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const noun = r.composite ? 'image' : 'review';
 
-  const del = button('', 'icon-btn', async () => {
-    if (!confirm('Delete this review?')) return;
-    if (AGENT_SYNC) await deleteRemote(r.id);
+  const del = button('', 'icon-btn danger', async () => {
+    if (!confirm(`Delete this ${noun}?`)) return;
+    await removeExport(r.id);
     await chrome.storage.local.remove(`review:${r.id}`);
   });
   del.innerHTML = TRASH;
   del.title = 'Delete';
-  del.setAttribute('aria-label', 'Delete review');
+  del.setAttribute('aria-label', `Delete ${noun}`);
+
+  const download = button('', 'icon-btn', () => saveFile(r.screenshot, `${slug(r.title || host || 'review')}-${r.id}.png`));
+  download.innerHTML = DOWNLOAD;
+  download.title = 'Download image';
+  download.setAttribute('aria-label', 'Download image');
+
+  const pick = h('input', { type: 'checkbox', 'aria-label': 'Select to combine' });
+  pick.checked = selected.includes(r.id);
+  pick.addEventListener('change', () =>
+    setSelection(pick.checked ? [...selected.filter((id) => id !== r.id), r.id] : selected.filter((id) => id !== r.id)),
+  );
+
+  const titleEl = r.composite
+    ? h('span', { class: 'title', title: r.title }, r.title)
+    : h('a', { class: 'title', href: r.url, target: '_blank', rel: 'noreferrer', title: r.title || r.url }, r.title || host);
+  const meta = r.composite ? `Combined from ${r.composite.sources.length} reviews · ${time}` : `${host} · ${time}`;
 
   const info = [
-    h(
-      'div',
-      { class: 'title-row' },
-      h(
-        'div',
-        {},
-        h('a', { class: 'title', href: r.url, target: '_blank', rel: 'noreferrer', title: r.title || r.url }, r.title || host),
-        h('div', { class: 'meta' }, `${host} · ${time}`),
-      ),
-      del,
-    ),
+    h('div', { class: 'title-row' }, h('div', {}, titleEl, h('div', { class: 'meta' }, meta)), download, del),
   ];
-  if (AGENT_SYNC) {
+  if (serverMode) {
     info.push(
       remote
         ? h('div', { class: 'sync sent' }, remote.open ? `Sent to Claude · ${remote.open} of ${remote.total} open` : 'All addressed ✓')
@@ -168,7 +210,7 @@ function card(r, remote) {
       button('Copy as image', '', async () => {
         const blob = await (await fetch(r.screenshot)).blob();
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        toast('Screenshot copied.');
+        toast(r.composite ? 'Image copied.' : 'Screenshot copied.');
       }),
       button('Copy as Markdown', '', async () => {
         await navigator.clipboard.writeText(toMarkdown(r));
@@ -177,25 +219,82 @@ function card(r, remote) {
     ),
   );
 
-  return h('article', { class: 'review', 'data-id': r.id }, shot, h('div', { class: 'info' }, ...info));
+  const article = h(
+    'article',
+    { class: `review${selected.includes(r.id) ? ' selected' : ''}`, 'data-id': r.id },
+    h('div', { class: 'shot-wrap' }, shot, h('label', { class: 'pick', title: 'Select to combine' }, pick)),
+    h('div', { class: 'info' }, ...info),
+  );
+  enableDrop(article, shot, r);
+  return article;
 }
 
-function button(label, cls, onClick) {
-  const b = h('button', cls ? { class: cls } : {}, label);
-  b.addEventListener('click', onClick);
-  return b;
+// Drag one screenshot onto another to combine the two.
+function enableDrop(article, shot, r) {
+  shot.addEventListener('dragstart', (e) => {
+    dragId = r.id;
+    e.dataTransfer.effectAllowed = 'copy';
+    e.dataTransfer.setData('text/plain', r.id);
+    document.body.classList.add('dragging');
+  });
+  shot.addEventListener('dragend', () => {
+    dragId = null;
+    document.body.classList.remove('dragging');
+    for (const el of list.querySelectorAll('.drop-target')) el.classList.remove('drop-target');
+  });
+  article.addEventListener('dragover', (e) => {
+    if (!dragId || dragId === r.id) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    article.classList.add('drop-target');
+  });
+  article.addEventListener('dragleave', (e) => {
+    if (!article.contains(e.relatedTarget)) article.classList.remove('drop-target');
+  });
+  article.addEventListener('drop', (e) => {
+    e.preventDefault();
+    article.classList.remove('drop-target');
+    const dragged = reviewsById.get(dragId || e.dataTransfer.getData('text/plain'));
+    if (!dragged || dragged.id === r.id) return;
+    // Older first, so "Before" is the earlier screenshot.
+    combine([dragged, r].sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+  });
 }
 
-function h(tag, attrs, ...children) {
-  const el = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-  el.append(...children);
-  return el;
+function setSelection(ids) {
+  selected = ids;
+  for (const article of list.querySelectorAll('article.review')) {
+    const on = selected.includes(article.dataset.id);
+    article.classList.toggle('selected', on);
+    article.querySelector('.pick input').checked = on;
+  }
+  updateSelectionBar();
 }
 
-function toast(message) {
-  clearTimeout(toastTimer);
-  toastEl.textContent = message;
-  toastEl.hidden = false;
-  toastTimer = setTimeout(() => (toastEl.hidden = true), 3000);
+function updateSelectionBar() {
+  const n = selected.length;
+  selectionBar.hidden = n === 0 || location.hash === '#settings';
+  document.body.classList.toggle('selecting', n > 0);
+  const combineBtn = document.getElementById('combine');
+  combineBtn.disabled = n < 2 || n > MAX_COMBINE;
+  document.getElementById('selectionCount').textContent =
+    n < 2 ? `${n} selected. Pick 2 to ${MAX_COMBINE}.` : n > MAX_COMBINE ? `${n} selected. Up to ${MAX_COMBINE} can be combined.` : `${n} selected`;
+}
+
+async function combine(reviews) {
+  const created = await openCompose(reviews.filter(Boolean));
+  if (created) {
+    setSelection([]);
+    toast('Combined image created.');
+  }
+}
+
+function slug(s) {
+  return (
+    String(s)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'review'
+  );
 }
