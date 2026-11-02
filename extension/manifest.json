@@ -10,7 +10,9 @@
     "unlimitedStorage",
     "contextMenus",
     "clipboardWrite",
-    "alarms"
+    "alarms",
+    "downloads",
+    "downloads.ui"
   ],
   "background": {
     "service_worker": "background.js",

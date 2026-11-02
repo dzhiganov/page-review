@@ -1,18 +1,9 @@
 // Client for the local page-review server (runs inside the MCP server or `npm run serve`).
 
-const DEFAULT_URL = 'http://localhost:47615';
-
-export async function getSettings() {
-  const { settings } = await chrome.storage.local.get('settings');
-  return settings ?? {};
-}
-
-export async function updateSettings(patch) {
-  await chrome.storage.local.set({ settings: { ...(await getSettings()), ...patch } });
-}
+import { getSettings } from './settings.js';
 
 async function call(path, init = {}) {
-  const base = (await getSettings()).serverUrl ?? DEFAULT_URL;
+  const base = (await getSettings()).serverUrl;
   const res = await fetch(base + path, { signal: AbortSignal.timeout(init.timeout ?? 5000), ...init });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(body.error ?? `server responded ${res.status}`);
