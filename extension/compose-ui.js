@@ -155,8 +155,23 @@ function draw() {
   return layout;
 }
 
+const createBtn = document.getElementById('composeCreate');
+
 async function create() {
+  if (!state || state.creating) return; // a double click must not make two items
+  state.creating = true;
+  createBtn.disabled = true;
+  try {
+    await createItem();
+  } finally {
+    createBtn.disabled = false;
+    if (state) state.creating = false;
+  }
+}
+
+async function createItem() {
   cancelAnimationFrame(frame);
+  const current = state;
   const layout = draw();
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   const screenshot = await new Promise((resolve) => {
@@ -166,17 +181,17 @@ async function create() {
   });
   const item = compositeReview({
     id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-    template: state.template,
-    sources: state.reviews,
+    template: current.template,
+    sources: current.reviews,
     screenshot,
     width: layout.width,
     height: layout.height,
   });
+  if (state !== current) return; // the dialog was closed meanwhile
   await chrome.storage.local.set({ [`review:${item.id}`]: item });
-  const { resolve } = state;
   state = null;
   dialog.close();
-  resolve(item);
+  current.resolve(item);
   exportReview(item); // to the Downloads folder or the local server, per the storage setting
 }
 
