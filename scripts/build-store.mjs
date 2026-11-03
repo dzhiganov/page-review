@@ -53,7 +53,7 @@ try {
 }
 
 async function smokeTest(extensionDir) {
-  const { context, sw, extId, page, openOverlay, close } = await launch({ extensionDir });
+  const { context, sw, extId, page, openOverlay, close } = await launch({ extensionDir, grantOptional: false });
   try {
     // Downloads is an optional permission: not granted until the user picks it in Settings.
     assert.equal(await sw.evaluate(() => typeof chrome.downloads), 'undefined', 'downloads API needs the optional permission');

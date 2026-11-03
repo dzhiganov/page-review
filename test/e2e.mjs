@@ -23,6 +23,8 @@ const ext = path.join(tmp, 'ext');
 fs.cpSync(path.join(root, 'extension'), ext, { recursive: true });
 const manifest = JSON.parse(fs.readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
 manifest.host_permissions = ['<all_urls>'];
+// Optional permissions (Downloads) granted up front: headless Chromium can't answer the prompt.
+manifest.permissions = [...manifest.permissions, ...(manifest.optional_permissions ?? [])];
 fs.writeFileSync(path.join(ext, 'manifest.json'), JSON.stringify(manifest));
 const flagsFile = path.join(ext, 'lib/flags.js');
 fs.writeFileSync(flagsFile, fs.readFileSync(flagsFile, 'utf8').replace(/AGENT_SYNC = \w+/, `AGENT_SYNC = ${AGENT}`));
