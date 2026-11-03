@@ -7,7 +7,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
-  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, moveTail } = globalThis.PageReviewArrows;
+  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard } = globalThis.PageReviewArrows;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -16,6 +16,8 @@
   const PREVIOUS_ATTACH_PX = 240;
   const NOTE_MAX_W = 280;
   const AVATAR_PX = 24;
+  const CARD_RADIUS = 16; // .note-card border-radius; the corner at the pin is CARD_PIN_RADIUS
+  const CARD_PIN_RADIUS = 4;
   const TEXT_PAD_Y = 4; // .text / textarea vertical padding
   const NOTE_CHROME_W = 10 + AVATAR_PX + 8 + 14; // card padding + avatar + gap
   const EDGE_PX = 12;
@@ -445,6 +447,7 @@
       }
       setBend(shape, bendThrough(shape, x, y));
       renderShape(shape);
+      reattachNotes(shape);
       renderSelection();
       return;
     }
@@ -550,19 +553,12 @@
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
   }
 
-  // Moves a shape and re-renders it; comments attached to a mark travel with it, and an
-  // arrow's tail follows its comment (the head stays on its target, the bend in proportion).
+  // Moves a shape and re-renders it; comments attached to a mark travel with it. (A moved
+  // comment re-aims its arrow's tail when it is placed: see attachTail.)
   function move(s, dx, dy) {
     translate(s, dx, dy);
     renderShape(s);
-    if (s.type === 'text') {
-      const arrow = s.mark && state.shapes.find((m) => m.id === s.mark && m.type === 'arrow');
-      if (arrow) {
-        moveTail(arrow, dx, dy);
-        renderShape(arrow);
-      }
-      return;
-    }
+    if (s.type === 'text') return;
     for (const note of state.shapes) {
       if (note.type === 'text' && note.mark === s.id) {
         translate(note, dx, dy);
@@ -631,6 +627,9 @@
     if (!existing) el.classList.add('new');
     const ta = el.querySelector('textarea');
     ta.value = shape.text;
+    // The card re-aims its arrow's tail as it's placed; a cancelled comment puts it back.
+    const arrow = !existing && mark && state.shapes.find((m) => m.id === mark);
+    const drawn = arrow && { x1: arrow.x1, y1: arrow.y1, cx: arrow.cx, cy: arrow.cy };
     notesLayer.appendChild(el);
     placeNote(el, shape);
     // Keep the page's own keyboard shortcuts away from what the reviewer types.
@@ -651,7 +650,7 @@
       }
     });
     ta.addEventListener('blur', () => commitText());
-    state.textInput = { el, ta, shape, original: existing };
+    state.textInput = { el, ta, shape, original: existing, arrow, drawn };
     updateNoteTools();
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
@@ -664,6 +663,13 @@
     const { el, shape, original } = edit;
     const text = edit.ta.value.trim();
     const unchanged = original && text === original.text && sameFont(original.font, shape.font);
+    if (edit.drawn) {
+      // Back to the arrow as drawn: either it stays that way, or the history entry below
+      // records it before the comment re-aims it again.
+      Object.assign(edit.arrow, edit.drawn);
+      if (edit.drawn.cx === undefined) setBend(edit.arrow, null);
+      renderShape(edit.arrow);
+    }
     if (cancel || unchanged || (!original && !text)) {
       if (original) {
         el.remove();
@@ -857,8 +863,9 @@
     let flipY = !fitsAbove;
     const arrow = s.mark && state.shapes.find((m) => m.id === s.mark && m.type === 'arrow');
     if (arrow) {
-      if (arrow.x2 > arrow.x1 && s.ax - w >= EDGE_PX) flipX = true;
-      if (arrow.y2 < arrow.y1 && s.ay + h <= vh - EDGE_PX) flipY = true;
+      // Measured from the pin, which stays put while the tail is re-aimed below.
+      if (arrow.x2 > s.ax && s.ax - w >= EDGE_PX) flipX = true;
+      if (arrow.y2 < s.ay && s.ay + h <= vh - EDGE_PX) flipY = true;
     }
     el.classList.toggle('flip-x', flipX);
     el.classList.toggle('flip-y', flipY);
@@ -868,6 +875,35 @@
     el.style.top = `${top}px`;
     // The card's box is what gets linked to nearby marks.
     Object.assign(s, { x: Math.round(left), y: Math.round(top), w: Math.round(w), h: Math.round(h) });
+    attachTail(s);
+  }
+
+  // An attached arrow's tail points into the middle of its comment card and stops a few px
+  // short of it. Recomputed whenever the card is placed (moved, edited, restyled) or the
+  // arrow's bend changes, so the saved shapes carry the same geometry.
+  function attachTail(note) {
+    const arrow = note.mark && state.shapes.find((m) => m.id === note.mark && m.type === 'arrow');
+    if (!arrow || !Number.isFinite(note.w)) return;
+    const tail = tailForCard(arrow, boxOf(note), cardRadii(note));
+    if (!tail || Object.entries(tail).every(([k, v]) => arrow[k] === v)) return;
+    Object.assign(arrow, tail);
+    renderShape(arrow);
+    if (state.selected === arrow.id) renderSelection();
+  }
+
+  function reattachNotes(arrow) {
+    const card = state.textInput?.shape;
+    if (card?.mark === arrow.id) attachTail(card);
+    for (const note of state.shapes) if (note.type === 'text' && note.mark === arrow.id) attachTail(note);
+  }
+
+  // Corner radii of a comment card, [top-left, top-right, bottom-right, bottom-left]: the
+  // corner at its pin is the sharp one (see .note-card in STYLES).
+  function cardRadii(note) {
+    const left = Math.abs(note.ax - note.x) < Math.abs(note.ax - (note.x + note.w));
+    const top = Math.abs(note.ay - note.y) < Math.abs(note.ay - (note.y + note.h));
+    const pin = top ? (left ? 0 : 1) : left ? 3 : 2;
+    return [0, 1, 2, 3].map((i) => (i === pin ? CARD_PIN_RADIUS : CARD_RADIUS));
   }
 
   // ---------- rendering ----------

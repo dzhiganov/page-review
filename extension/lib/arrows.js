@@ -1,5 +1,5 @@
 // Arrow geometry: the default gentle bend, the bend handle, and keeping a bend in proportion
-// when the tail moves. An arrow is { x1, y1, x2, y2 } plus an optional quadratic Bezier
+// when the tail moves to its comment card. An arrow is { x1, y1, x2, y2 } plus an optional quadratic Bezier
 // control point { cx, cy }; without one it is straight.
 // Loaded as a classic script into the review overlay (exposes globalThis.PageReviewArrows)
 // and imported by the unit tests in Node.
@@ -8,6 +8,7 @@
   const BEND_MAX_PX = 36; // ...but never more than this
   const MIN_BEND_LENGTH = 48; // shorter arrows stay straight
   const FLAT_PX = 3; // a handle dragged this close to the straight line makes the arrow straight
+  const GAP_PX = 6; // space between an arrow's tail and its comment card
 
   const round = (v) => Math.round(v * 10) / 10;
 
@@ -68,14 +69,54 @@
     };
   }
 
-  // Moves the tail by (dx, dy), head fixed, keeping the curve in proportion. Mutates `a`.
-  function moveTail(a, dx, dy) {
-    const rel = relativeBend(a);
-    a.x1 += dx;
-    a.y1 += dy;
-    if (rel) Object.assign(a, applyRelativeBend(a, rel));
-    return a;
+  // Distance from the centre of `box` along the unit direction `d` to its rounded border.
+  // radii: corner radii [top-left, top-right, bottom-right, bottom-left].
+  function borderDistance(box, radii, d) {
+    const [hw, hh] = [box.w / 2, box.h / 2];
+    const [ax, ay] = [Math.abs(d[0]), Math.abs(d[1])];
+    let t = Math.min(ax ? hw / ax : Infinity, ay ? hh / ay : Infinity);
+    const corner = d[1] < 0 ? (d[0] < 0 ? 0 : 1) : d[0] < 0 ? 3 : 2;
+    const r = Math.max(0, Math.min(radii[corner] ?? 0, hw, hh));
+    // By symmetry, work in the quadrant where both components are positive.
+    if (r > 0 && ax * t > hw - r && ay * t > hh - r) {
+      // The exit is on the corner's arc: |t*d - c| = r, far root.
+      const [cx, cy] = [hw - r, hh - r];
+      const b = ax * cx + ay * cy;
+      t = b + Math.sqrt(Math.max(0, b * b - (cx * cx + cy * cy - r * r)));
+    }
+    return t;
   }
 
-  globalThis.PageReviewArrows = { isCurved, defaultBend, midpoint, bendThrough, relativeBend, applyRelativeBend, moveTail };
+  // Tail for an arrow whose comment card is `box`: on the line from the card's centre along
+  // the curve's tangent at the tail (so the arrow looks like it continues into the middle of
+  // the card), with `gap` px of clear space to the card's rounded border, at any angle. The head stays, the bend keeps its
+  // proportion. Returns { x1, y1 } plus { cx, cy } for a curved arrow, or null when the head
+  // is on (or right next to) the card.
+  function tailForCard(a, box, radii, gap = GAP_PX) {
+    const o = [box.x + box.w / 2, box.y + box.h / 2];
+    // Points `gap` px from a rounded rect form the same rect grown by `gap`, corners included.
+    const outer = { x: box.x - gap, y: box.y - gap, w: box.w + gap * 2, h: box.h + gap * 2 };
+    const outerRadii = radii.map((r) => Math.min(r, box.w / 2, box.h / 2) + gap);
+    const near = gap + 2;
+    if (a.x2 > box.x - near && a.x2 < box.x + box.w + near && a.y2 > box.y - near && a.y2 < box.y + box.h + near) return null;
+    const rel = relativeBend(a);
+    let tail = { x1: a.x1, y1: a.y1, x2: a.x2, y2: a.y2, ...(rel ? { cx: a.cx, cy: a.cy } : {}) };
+    // The tangent at the tail points at the control point, which itself depends on the tail:
+    // a few rounds settle it.
+    for (let i = 0; i < 8; i++) {
+      const aim = rel ? [tail.cx, tail.cy] : [a.x2, a.y2];
+      const len = Math.hypot(aim[0] - o[0], aim[1] - o[1]);
+      if (!len) return null;
+      const d = [(aim[0] - o[0]) / len, (aim[1] - o[1]) / len];
+      const t = borderDistance(outer, outerRadii, d);
+      const next = { ...tail, x1: round(o[0] + d[0] * t), y1: round(o[1] + d[1] * t) };
+      if (rel) Object.assign(next, applyRelativeBend(next, rel));
+      const settled = Math.hypot(next.x1 - tail.x1, next.y1 - tail.y1) < 0.1;
+      tail = next;
+      if (settled) break;
+    }
+    return rel ? { x1: tail.x1, y1: tail.y1, cx: tail.cx, cy: tail.cy } : { x1: tail.x1, y1: tail.y1 };
+  }
+
+  globalThis.PageReviewArrows = { isCurved, defaultBend, midpoint, bendThrough, relativeBend, applyRelativeBend, borderDistance, tailForCard, GAP_PX };
 })();

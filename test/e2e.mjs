@@ -393,7 +393,16 @@ try {
   await drag([fb.x + fb.width / 2, fb.y + fb.height / 2], [fb.x + fb.width / 2 + 60, fb.y + fb.height / 2 + 40]);
   const [t1x, t1y, h1x, h1y] = await ends();
   assert.deepEqual([h1x, h1y], [h0x, h0y], 'arrow head stays on its target');
-  assert.ok(Math.abs(t1x - t0x - 60) < 1 && Math.abs(t1y - t0y - 40) < 1, `tail follows the comment: ${[t0x, t0y, t1x, t1y]}`);
+  // The tail sits just outside the moved card, aimed along its tangent at the card's centre.
+  const fc = await follow.boundingBox();
+  const [qx1, qy1] = (await followArrow.getAttribute('d')).match(/ Q(\S+) (\S+)/).slice(1).map(Number);
+  const [ox, oy] = [fc.x + fc.width / 2, fc.y + fc.height / 2];
+  const off = Math.abs((qx1 - t1x) * (oy - t1y) - (qy1 - t1y) * (ox - t1x)) / Math.hypot(qx1 - t1x, qy1 - t1y);
+  assert.ok(off < 1.5, `tangent at the tail passes through the card centre (off by ${off})`);
+  const gapX = Math.max(fc.x - t1x, 0, t1x - (fc.x + fc.width));
+  const gapY = Math.max(fc.y - t1y, 0, t1y - (fc.y + fc.height));
+  assert.ok(Math.hypot(gapX, gapY) > 1 && Math.hypot(gapX, gapY) <= 6.5, `tail just outside the card: ${[gapX, gapY]}`);
+  assert.ok(Math.hypot(t1x - t0x - 60, t1y - t0y - 40) < 25, 'tail moved with the comment');
   await page.keyboard.press('Control+z');
   assert.deepEqual(await ends(), [t0x, t0y, h0x, h0y], 'one undo puts the arrow back');
   assert.ok(Math.abs((await follow.boundingBox()).x - fb.x) < 1, 'and the comment');

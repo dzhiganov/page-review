@@ -49,27 +49,77 @@ test('dragging the handle moves the curve midpoint to it; flat makes it straight
   assert.deepEqual(A.midpoint({ x1: 0, y1: 0, x2: 200, y2: 0 }), [100, 0]);
 });
 
-test('moving the tail keeps the head and the bend in proportion', () => {
-  const a = { x1: 100, y1: 300, x2: 300, y2: 300 };
-  Object.assign(a, A.defaultBend(a));
-  const before = A.relativeBend(a);
-  A.moveTail(a, -100, 0); // 1.5 times as long
-  assert.deepEqual([a.x2, a.y2], [300, 300], 'head stays');
-  assert.deepEqual([a.x1, a.y1], [0, 300]);
-  const after = A.relativeBend(a);
-  assert.ok(near(after.u, before.u, 0.01) && near(after.v, before.v, 0.01), 'same relative bend');
-  assert.ok(near(bulge(a), 36), `bulge scales with length: ${bulge(a)}`);
+const R = [16, 16, 16, 16];
+const card = (x, y, w = 200, h = 40) => ({ x, y, w, h });
+// Distance from a point to a rounded rect's border (positive outside); r is clamped like the card's.
+const outside = ([px, py], b, r) => {
+  r = Math.min(r, b.w / 2, b.h / 2);
+  const qx = Math.abs(px - (b.x + b.w / 2)) - (b.w / 2 - r);
+  const qy = Math.abs(py - (b.y + b.h / 2)) - (b.h / 2 - r);
+  return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - r;
+};
+// Does the tangent at the tail, extended backwards, pass through the card's centre?
+const aimsAtCentre = (a, b) => {
+  const [ax, ay] = A.isCurved(a) ? [a.cx, a.cy] : [a.x2, a.y2];
+  const [ox, oy] = [b.x + b.w / 2, b.y + b.h / 2];
+  const cross = (ax - a.x1) * (oy - a.y1) - (ay - a.y1) * (ox - a.x1);
+  return Math.abs(cross) / Math.hypot(ax - a.x1, ay - a.y1) < 0.5;
+};
+const attach = (a, b, r = R) => Object.assign({ ...a }, A.tailForCard(a, b, r));
+
+test('border distance: straight sides and rounded corners', () => {
+  assert.equal(A.borderDistance(card(0, 0, 100, 40), [0, 0, 0, 0], [1, 0]), 50);
+  assert.equal(A.borderDistance(card(0, 0, 100, 40), R, [0, -1]), 20);
+  // Diagonal of a 100px square with 16px corners: 34*sqrt(2) + 16.
+  assert.ok(near(A.borderDistance(card(0, 0, 100, 100), R, [Math.SQRT1_2, Math.SQRT1_2]), 34 * Math.SQRT2 + 16, 1e-9));
+  // A sharp corner reaches further than a rounded one.
+  const d = [Math.SQRT1_2, -Math.SQRT1_2];
+  assert.ok(A.borderDistance(card(0, 0, 100, 100), [16, 4, 16, 16], d) > A.borderDistance(card(0, 0, 100, 100), R, d));
 });
 
-test('moving the tail round the head rotates the bend with the arrow', () => {
-  const a = { x1: 0, y1: 100, x2: 200, y2: 100 };
-  Object.assign(a, A.defaultBend(a)); // arcs upwards
-  A.moveTail(a, 400, 0); // now points right to left
-  assert.ok(a.cy > 100, 'still bends clockwise, now downwards');
+test('the tail stops 6px outside the card on each side, aimed at its centre', () => {
+  const head = [600, 400];
+  const cards = { right: card(800, 380), left: card(200, 380), above: card(500, 100), below: card(500, 700) };
+  for (const [side, b] of Object.entries(cards)) {
+    for (const bent of [false, true]) {
+      const a = { x1: b.x + b.w / 2, y1: b.y + b.h / 2, x2: head[0], y2: head[1] };
+      if (bent) Object.assign(a, A.defaultBend(a));
+      const t = attach(a, b);
+      assert.ok(near(outside([t.x1, t.y1], b, 16), 6, 0.2), `${side} ${bent}: gap ${outside([t.x1, t.y1], b, 16)}`);
+      assert.ok(aimsAtCentre(t, b), `${side} ${bent}: aims at the centre`);
+      assert.deepEqual([t.x2, t.y2], head, 'head stays');
+      if (bent) assert.ok(near(A.relativeBend(t).v, A.relativeBend(a).v, 0.01), 'bend in proportion');
+    }
+  }
 });
 
-test('moving the tail of a straight arrow keeps it straight', () => {
-  const a = A.moveTail({ x1: 0, y1: 0, x2: 100, y2: 0 }, 10, 20);
-  assert.equal(A.isCurved(a), false);
-  assert.deepEqual([a.x1, a.y1, a.x2, a.y2], [10, 20, 100, 0]);
+test('an arrow leaving through a corner of the card clears the rounded corner', () => {
+  const b = card(100, 100, 200, 60); // centre (200, 130), top-right corner (300, 100)
+  const head = [700, -20]; // on the line from the centre through the corner
+  const t = attach({ x1: 200, y1: 130, x2: head[0], y2: head[1] }, b);
+  assert.ok(t.x1 > 300 - 16 && t.y1 < 100 + 16, `off the corner: ${t.x1},${t.y1}`);
+  assert.ok(near(outside([t.x1, t.y1], b, 16), 6, 0.2), `gap ${outside([t.x1, t.y1], b, 16)}`);
+  assert.ok(aimsAtCentre(t, b));
+  // The sharp pin corner (4px) is honoured: the tail sits further out than with 16px.
+  const sharp = attach({ x1: 200, y1: 130, x2: head[0], y2: head[1] }, b, [16, 4, 16, 16]);
+  assert.ok(near(outside([sharp.x1, sharp.y1], b, 4), 6, 0.2));
+  assert.ok(Math.hypot(sharp.x1 - 200, sharp.y1 - 130) > Math.hypot(t.x1 - 200, t.y1 - 130));
+});
+
+test('a grazing angle still leaves a 6px clearance', () => {
+  const b = card(100, 100, 300, 40);
+  const t = attach({ x1: 250, y1: 120, x2: 900, y2: 150 }, b);
+  assert.ok(near(outside([t.x1, t.y1], b, 16), 6, 0.2), `gap ${outside([t.x1, t.y1], b, 16)}`);
+});
+
+test('a tiny card still gets a 6px gap', () => {
+  const b = card(100, 100, 20, 12);
+  const t = attach({ x1: 110, y1: 106, x2: 300, y2: 250 }, b);
+  assert.ok(near(outside([t.x1, t.y1], b, 6), 6, 0.2), `gap ${outside([t.x1, t.y1], b, 6)}`);
+  assert.ok(aimsAtCentre(t, b));
+});
+
+test('no tail change when the head is on the card', () => {
+  assert.equal(A.tailForCard({ x1: 0, y1: 0, x2: 150, y2: 120 }, card(100, 100), R), null);
+  assert.equal(A.tailForCard({ x1: 0, y1: 0, x2: 96, y2: 120 }, card(100, 100), R), null, 'within the gap');
 });
