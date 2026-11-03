@@ -377,6 +377,26 @@ try {
   assert.doesNotMatch(await arrowD(), /Q/, 'dragged flat: straight');
   await page.keyboard.press('Control+z');
   assert.match(await arrowD(), /Q/, 'one undo restores the bend');
+
+  // Dragging a comment takes its arrow's tail along (head stays put), as one undo step.
+  await page.keyboard.press('Escape'); // deselect
+  await page.keyboard.press('a');
+  await drag([800, 650], [1000, 520]);
+  await page.keyboard.type('Follow me');
+  await page.keyboard.press('Enter');
+  const follow = overlay('.note-card').filter({ hasText: 'Follow me' });
+  const followArrow = overlay('g[data-type="arrow"] path').nth(3);
+  const ends = async () => (await followArrow.getAttribute('d')).match(/^M(\S+) (\S+) Q\S+ \S+ (\S+) (\S+)/).slice(1).map(Number);
+  const [t0x, t0y, h0x, h0y] = await ends();
+  const fb = await follow.boundingBox();
+  await page.keyboard.press('v');
+  await drag([fb.x + fb.width / 2, fb.y + fb.height / 2], [fb.x + fb.width / 2 + 60, fb.y + fb.height / 2 + 40]);
+  const [t1x, t1y, h1x, h1y] = await ends();
+  assert.deepEqual([h1x, h1y], [h0x, h0y], 'arrow head stays on its target');
+  assert.ok(Math.abs(t1x - t0x - 60) < 1 && Math.abs(t1y - t0y - 40) < 1, `tail follows the comment: ${[t0x, t0y, t1x, t1y]}`);
+  await page.keyboard.press('Control+z');
+  assert.deepEqual(await ends(), [t0x, t0y, h0x, h0y], 'one undo puts the arrow back');
+  assert.ok(Math.abs((await follow.boundingBox()).x - fb.x) < 1, 'and the comment');
   page.once('dialog', (d) => d.accept());
   await inject(); // close (unsaved: confirm)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });

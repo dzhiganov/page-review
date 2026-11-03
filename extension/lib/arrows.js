@@ -1,5 +1,6 @@
-// Arrow geometry: the default gentle bend and the bend handle. An arrow is { x1, y1, x2, y2 }
-// plus an optional quadratic Bezier control point { cx, cy }; without one it is straight.
+// Arrow geometry: the default gentle bend, the bend handle, and keeping a bend in proportion
+// when the tail moves. An arrow is { x1, y1, x2, y2 } plus an optional quadratic Bezier
+// control point { cx, cy }; without one it is straight.
 // Loaded as a classic script into the review overlay (exposes globalThis.PageReviewArrows)
 // and imported by the unit tests in Node.
 (() => {
@@ -47,5 +48,34 @@
     return { cx: round(2 * hx - f.mid[0]), cy: round(2 * hy - f.mid[1]) };
   }
 
-  globalThis.PageReviewArrows = { isCurved, defaultBend, midpoint, bendThrough };
+  // The control point in the arrow's own frame, as fractions of its length.
+  function relativeBend(a) {
+    const f = frame(a);
+    if (!f || !isCurved(a)) return null;
+    const d = [a.cx - f.mid[0], a.cy - f.mid[1]];
+    return { u: (d[0] * f.e[0] + d[1] * f.e[1]) / f.len, v: (d[0] * f.n[0] + d[1] * f.n[1]) / f.len };
+  }
+
+  // Control point for arrow `a` (new endpoints) with the same relative bend as before.
+  function applyRelativeBend(a, rel) {
+    const f = frame(a);
+    if (!f || !rel) return null;
+    const along = rel.u * f.len;
+    const across = rel.v * f.len;
+    return {
+      cx: round(f.mid[0] + f.e[0] * along + f.n[0] * across),
+      cy: round(f.mid[1] + f.e[1] * along + f.n[1] * across),
+    };
+  }
+
+  // Moves the tail by (dx, dy), head fixed, keeping the curve in proportion. Mutates `a`.
+  function moveTail(a, dx, dy) {
+    const rel = relativeBend(a);
+    a.x1 += dx;
+    a.y1 += dy;
+    if (rel) Object.assign(a, applyRelativeBend(a, rel));
+    return a;
+  }
+
+  globalThis.PageReviewArrows = { isCurved, defaultBend, midpoint, bendThrough, relativeBend, applyRelativeBend, moveTail };
 })();

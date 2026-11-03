@@ -7,7 +7,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
-  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough } = globalThis.PageReviewArrows;
+  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, moveTail } = globalThis.PageReviewArrows;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -550,11 +550,19 @@
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
   }
 
-  // Moves a shape and re-renders it; comments attached to a mark travel with it.
+  // Moves a shape and re-renders it; comments attached to a mark travel with it, and an
+  // arrow's tail follows its comment (the head stays on its target, the bend in proportion).
   function move(s, dx, dy) {
     translate(s, dx, dy);
     renderShape(s);
-    if (s.type === 'text') return;
+    if (s.type === 'text') {
+      const arrow = s.mark && state.shapes.find((m) => m.id === s.mark && m.type === 'arrow');
+      if (arrow) {
+        moveTail(arrow, dx, dy);
+        renderShape(arrow);
+      }
+      return;
+    }
     for (const note of state.shapes) {
       if (note.type === 'text' && note.mark === s.id) {
         translate(note, dx, dy);
