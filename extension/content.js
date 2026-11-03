@@ -31,6 +31,7 @@
     rect: '<rect x="4" y="5" width="16" height="14" rx="2"/>',
     text: '<path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 20.5l1.6-5.4A8.4 8.4 0 1 1 21 11.5Z"/>',
     eraser: '<path d="m7 20-4-4 10-10 7 7-7 7Z"/><path d="M7 20h13"/><path d="m8 11 6 6"/>',
+    outlines: '<path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="8" y="9" width="8" height="6" rx="1"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
     redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
     clear: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="m6 6 1 14h10l1-14"/>',
@@ -152,6 +153,12 @@
       position: absolute; top: -22px; left: -2px; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       background: #1971c2; color: #fff; font: 11px/1 ui-monospace, monospace; padding: 4px 6px; border-radius: 4px;
     }
+    .outlines { position: fixed; inset: 0; pointer-events: none; }
+    .outline { position: fixed; border: 1.5px dashed var(--c); background: color-mix(in srgb, var(--c) 6%, transparent); pointer-events: none; }
+    .outline span {
+      position: absolute; top: -21px; left: -1.5px; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      background: var(--c); color: #fff; font: 11px/1 ui-monospace, monospace; padding: 4px 6px; border-radius: 4px;
+    }
     .toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px;
@@ -159,7 +166,7 @@
     }
     .toast[hidden] { display: none; }
     .toast button { all: unset; cursor: pointer; color: #b197fc; font-weight: 600; }
-    :host(.capturing) .toolbar, :host(.capturing) .hints, :host(.capturing) .selection,
+    :host(.capturing) .toolbar, :host(.capturing) .hints, :host(.capturing) .outlines, :host(.capturing) .selection,
     :host(.capturing) .toast, :host(.capturing) .frame, :host(.capturing) .note-tools,
     :host(.capturing) .note-card.leaving { display: none !important; }
   `;
@@ -174,6 +181,8 @@
     selected: null, // shape id
     drawing: null,
     drag: null,
+    outlines: false, // keep linked elements outlined and outline the one under the cursor
+    hover: null, // { x, y } of the cursor while outlines are on
     bendDrag: null, // dragging a selected arrow's midpoint handle
     erasing: false,
     textInput: null,
@@ -186,7 +195,7 @@
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
   let avatarSrc = null; // the user's avatar (Settings on the reviews page), shown on comment cards
   let avatarBlocked = false; // the page refused to load it once (e.g. its CSP): use the icon from then on
-  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, toolbar, noteTools, toastEl, toastTimer;
+  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, outlinesEl, toolbar, noteTools, toastEl, toastTimer;
 
   // ---------- lifecycle ----------
 
@@ -203,6 +212,7 @@
       </div>
       <div class="frame"></div>
       <div class="hints"></div>
+      <div class="outlines"></div>
       <div class="toolbar" role="toolbar"></div>
       <div class="note-tools" role="toolbar" hidden></div>
       <div class="toast" hidden></div>
@@ -214,6 +224,7 @@
     badgeLayer = shadow.querySelector('.badges');
     notesLayer = shadow.querySelector('.notes');
     hintsEl = shadow.querySelector('.hints');
+    outlinesEl = shadow.querySelector('.outlines');
     toolbar = shadow.querySelector('.toolbar');
     noteTools = shadow.querySelector('.note-tools');
     toastEl = shadow.querySelector('.toast');
@@ -225,10 +236,15 @@
     stage.addEventListener('pointerup', onPointerUp);
     stage.addEventListener('click', onStageClick);
     stage.addEventListener('dblclick', onStageDblClick);
+    stage.addEventListener('pointermove', onHover);
+    stage.addEventListener('pointerleave', onHover);
+    window.addEventListener('scroll', scheduleOutlines, true);
+    window.addEventListener('resize', scheduleOutlines);
     // Drawings are tied to the viewport, so the page must not scroll under them.
     host.addEventListener('wheel', preventDefault, { passive: false });
     host.addEventListener('touchmove', preventDefault, { passive: false });
     window.addEventListener('keydown', onKeyDown, true);
+    loadPrefs();
 
     // Ready long before the first comment; a re-render here could drop an open comment editor.
     chrome.storage.local.get('settings').then(({ settings }) => {
@@ -245,6 +261,8 @@
   function close() {
     if (state.dirty && !confirm('Discard unsaved annotations?')) return;
     window.removeEventListener('keydown', onKeyDown, true);
+    window.removeEventListener('scroll', scheduleOutlines, true);
+    window.removeEventListener('resize', scheduleOutlines);
     host.remove();
     state.open = false;
     state.textInput = null;
@@ -266,6 +284,7 @@
     for (const t of TOOLS) {
       parts.push(`<button data-tool="${t.id}" title="${t.title}">${icon(t.id)}</button>`);
     }
+    parts.push(`<button data-action="outlines" title="Show elements" aria-label="Show elements">${icon('outlines')}</button>`);
     parts.push('<span class="sep"></span>');
     COLORS.forEach((c, i) => {
       parts.push(
@@ -293,6 +312,7 @@
       else if (action === 'reviews') chrome.runtime.sendMessage({ type: 'open-reviews' });
       else if (action === 'save') save();
       else if (action === 'close') close();
+      else if (action === 'outlines') setOutlines(!state.outlines, true);
     });
     enableToolbarDrag(toolbar.querySelector('.grip'));
     setColor(state.color);
@@ -592,6 +612,7 @@
 
   function removeShape(shape) {
     if (!shape) return;
+    scheduleOutlines();
     pushHistory();
     state.shapes = state.shapes.filter((s) => s !== shape);
     nodes.get(shape.id)?.remove();
@@ -915,6 +936,7 @@
   }
 
   function renderAll() {
+    scheduleOutlines();
     shapesLayer.replaceChildren();
     notesLayer.replaceChildren();
     badgeLayer.replaceChildren();
@@ -924,6 +946,7 @@
   }
 
   function renderShape(s) {
+    scheduleOutlines();
     if (s.type === 'text') {
       let el = nodes.get(s.id);
       if (el) {
@@ -1323,6 +1346,77 @@
     setTimeout(() => (hint.style.opacity = '0'), 1200);
     setTimeout(() => hint.remove(), 1700);
   }
+
+  // ---------- element outlines ("Show elements") ----------
+
+  // Editor preferences, kept apart from the reviews page's `settings`.
+  const PREFS_KEY = 'editorPrefs';
+
+  async function loadPrefs() {
+    try {
+      const { [PREFS_KEY]: prefs } = await chrome.storage.local.get(PREFS_KEY);
+      setOutlines(prefs?.outlines === true, false);
+    } catch {} // storage unavailable: defaults
+  }
+
+  async function setOutlines(on, remember) {
+    state.outlines = on;
+    toolbar.querySelector('[data-action="outlines"]').setAttribute('aria-pressed', String(on));
+    if (!on) state.hover = null;
+    scheduleOutlines();
+    if (!remember) return;
+    try {
+      const { [PREFS_KEY]: prefs } = await chrome.storage.local.get(PREFS_KEY);
+      await chrome.storage.local.set({ [PREFS_KEY]: { ...prefs, outlines: on } });
+    } catch {}
+  }
+
+  function onHover(e) {
+    if (!state.outlines) return;
+    const over = e.type === 'pointermove' && !e.target.closest?.('.note-card');
+    state.hover = over ? { x: e.clientX, y: e.clientY } : null;
+    scheduleOutlines();
+  }
+
+  // One redraw per frame at most, however many shapes, moves or scroll events come in.
+  let outlinesFrame = 0;
+  function scheduleOutlines() {
+    if (outlinesFrame || !outlinesEl) return;
+    outlinesFrame = requestAnimationFrame(() => {
+      outlinesFrame = 0;
+      drawOutlines();
+    });
+  }
+
+  // Every element a mark or comment points at, in that mark's colour, plus the one under the
+  // cursor. Only these: outlining the whole page would be noise.
+  function drawOutlines() {
+    if (!state.open) return;
+    const found = new Map(); // element -> colour (the first mark wins)
+    if (state.outlines) {
+      for (const s of state.shapes) {
+        const el =
+          s.type !== 'text' ? targetOf(s, false) : s.mark ? null : elementsAt(s.ax, s.ay)[0];
+        if (el && !found.has(el)) found.set(el, s.type === 'text' ? HOVER_COLOR : s.color);
+      }
+      const hovered = state.hover && elementsAt(state.hover.x, state.hover.y)[0];
+      if (hovered && !found.has(hovered)) found.set(hovered, HOVER_COLOR);
+    }
+    outlinesEl.replaceChildren(
+      ...[...found].map(([el, color]) => {
+        const r = el.getBoundingClientRect();
+        const box = document.createElement('div');
+        box.className = 'outline';
+        box.style.cssText = `left:${r.left}px;top:${r.top}px;width:${r.width}px;height:${r.height}px;--c:${color}`;
+        const label = document.createElement('span');
+        label.textContent = shortName(el);
+        box.appendChild(label);
+        return box;
+      }),
+    );
+  }
+
+  const HOVER_COLOR = '#1971c2';
 
   // ---------- save ----------
 

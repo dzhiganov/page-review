@@ -406,8 +406,40 @@ try {
   await page.keyboard.press('Control+z');
   assert.deepEqual(await ends(), [t0x, t0y, h0x, h0y], 'one undo puts the arrow back');
   assert.ok(Math.abs((await follow.boundingBox()).x - fb.x) < 1, 'and the comment');
+
+  // Show elements: off by default; on, linked elements stay outlined and the one under the
+  // cursor gets an outline too, with any tool. Remembered across sessions.
+  const outlines = overlay('.outlines .outline');
+  const toggle = overlay('[data-action="outlines"]');
+  assert.equal(await toggle.getAttribute('aria-label'), 'Show elements');
+  assert.equal(await outlines.count(), 0, 'off by default');
+  await toggle.click();
+  assert.equal(await toggle.getAttribute('aria-pressed'), 'true');
+  await page.waitForTimeout(100);
+  const linked = await overlay('.outlines .outline span').allTextContents();
+  assert.deepEqual(linked, ['main'], 'the element the marks point at, once'); // all marks so far land on <main>
+  const buyBtn = await page.locator('#buy').boundingBox();
+  await page.keyboard.press('v');
+  await page.mouse.move(buyBtn.x + 10, buyBtn.y + 10);
+  await page.waitForTimeout(100);
+  assert.ok((await overlay('.outlines .outline span').allTextContents()).includes('button#buy'), 'hovered element outlined');
+  await page.mouse.move(5, 795); // off the button
+  await page.waitForTimeout(100);
+  assert.ok(!(await overlay('.outlines .outline span').allTextContents()).includes('button#buy'), 'hover outline follows the cursor');
+  assert.deepEqual(await sw.evaluate(async () => (await chrome.storage.local.get('editorPrefs')).editorPrefs), { smooth: true, outlines: true }, 'saved, old keys kept');
+  await page.evaluate(() => document.querySelector('page-review-overlay').classList.add('capturing'));
+  assert.equal(await overlay('.outlines').evaluate((el) => getComputedStyle(el).display), 'none', 'never in the screenshot');
+  await page.evaluate(() => document.querySelector('page-review-overlay').classList.remove('capturing'));
   page.once('dialog', (d) => d.accept());
   await inject(); // close (unsaved: confirm)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  await page.waitForTimeout(100);
+  assert.equal(await page.locator('page-review-overlay [data-action="outlines"]').getAttribute('aria-pressed'), 'true', 'remembered');
+  await page.locator('page-review-overlay [data-action="outlines"]').click(); // off again
+  assert.equal((await sw.evaluate(async () => (await chrome.storage.local.get('editorPrefs')).editorPrefs)).outlines, false);
+  await inject(); // close (nothing drawn)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
   // Combine: drag one screenshot onto another, create a Before / After image from them.
