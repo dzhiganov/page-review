@@ -7,8 +7,6 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
-  const { recognize } = globalThis.PageReviewSmooth;
-  const PREFS_KEY = 'editorPrefs';
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -140,9 +138,6 @@
     .toolbar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .toolbar .grip { cursor: grab; min-width: 20px; padding: 0; opacity: .6; }
     .toolbar .grip svg { fill: currentColor; stroke: none; }
-    .toolbar label.smooth { display: inline-flex; align-items: center; gap: 5px; padding: 0 8px 0 6px; height: 32px; cursor: pointer; opacity: .85; }
-    .toolbar label.smooth:hover { opacity: 1; }
-    .toolbar label.smooth input { margin: 0; accent-color: #845ef7; cursor: pointer; }
     .sep { width: 1px; height: 20px; background: rgba(255,255,255,.18); margin: 0 4px; }
     .swatch { width: 18px; height: 18px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 1px rgba(255,255,255,.35); }
     .toolbar button.color { min-width: 26px; padding: 0; }
@@ -181,7 +176,6 @@
     pressedNote: null, // comment just clicked; pointer capture retargets the click to the stage
     dirty: false,
     saving: false,
-    smooth: false, // clean up freehand strokes (remembered in editorPrefs)
     noteFont: { ...DEFAULT_FONT }, // font for new comments: the last one picked in this session
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
@@ -220,7 +214,6 @@
     toastEl = shadow.querySelector('.toast');
     buildToolbar();
     buildNoteTools();
-    loadPrefs();
 
     stage.addEventListener('pointerdown', onPointerDown);
     stage.addEventListener('pointermove', onPointerMove);
@@ -268,7 +261,6 @@
     for (const t of TOOLS) {
       parts.push(`<button data-tool="${t.id}" title="${t.title}">${icon(t.id)}</button>`);
     }
-    parts.push('<label class="smooth" title="Straighten lines and clean up freehand strokes"><input type="checkbox">Smooth</label>');
     parts.push('<span class="sep"></span>');
     COLORS.forEach((c, i) => {
       parts.push(
@@ -297,25 +289,8 @@
       else if (action === 'save') save();
       else if (action === 'close') close();
     });
-    toolbar.querySelector('.smooth input').addEventListener('change', (e) => {
-      state.smooth = e.target.checked;
-      savePrefs();
-    });
     enableToolbarDrag(toolbar.querySelector('.grip'));
     setColor(state.color);
-  }
-
-  // Editor preferences live in their own storage key, apart from `settings`.
-  async function loadPrefs() {
-    try {
-      const { [PREFS_KEY]: prefs } = await chrome.storage.local.get(PREFS_KEY);
-      state.smooth = prefs?.smooth === true;
-    } catch {} // storage unavailable: defaults
-    if (toolbar) toolbar.querySelector('.smooth input').checked = state.smooth;
-  }
-
-  function savePrefs() {
-    chrome.storage.local.set({ [PREFS_KEY]: { smooth: state.smooth } }).catch(() => {});
   }
 
   function enableToolbarDrag(grip) {
@@ -505,27 +480,13 @@
     if (tooSmall) return;
     delete s.ox;
     delete s.oy;
-    const shape = s.type === 'pen' && state.smooth ? smoothed(s) : s;
-    addShape(shape);
-    showHint(shape);
+    addShape(s);
+    showHint(s);
     // An arrow or a box is almost always followed by a comment about it: start one right away.
-    if (shape.type === 'arrow' || shape.type === 'rect') {
-      const [ax, ay] = shape.type === 'arrow' ? [shape.x1, shape.y1] : [shape.x + shape.w, shape.y];
-      openNoteEditor(null, ax, ay, shape.id);
+    if (s.type === 'arrow' || s.type === 'rect') {
+      const [ax, ay] = s.type === 'arrow' ? [s.x1, s.y1] : [s.x + s.w, s.y];
+      openNoteEditor(null, ax, ay, s.id);
     }
-  }
-
-  // A pen stroke after recognition: a straight line, arrow, box, ellipse or smooth curve.
-  function smoothed(s) {
-    const r = recognize(s.points);
-    if (!r) return s;
-    const { id, color } = s;
-    if (r.type === 'arrow') {
-      const { x1, y1, x2, y2, cx, cy } = r;
-      return { id, type: 'arrow', color, x1, y1, x2, y2, ...(cx === undefined ? {} : { cx, cy }) };
-    }
-    if (r.type === 'rect') return { id, type: 'rect', color, x: r.x, y: r.y, w: r.w, h: r.h };
-    return { ...s, points: r.points };
   }
 
   function onStageClick(e) {

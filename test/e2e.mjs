@@ -55,6 +55,8 @@ try {
   const extId = new URL(sw.url()).host;
   assert.equal(extId, 'lehkiologlmiimeklbeblhinfkldafmj', 'extension id is pinned by the manifest key');
   await sw.evaluate((url) => chrome.storage.local.set({ settings: { serverUrl: url } }), `http://localhost:${receiverPort}`);
+  // Prefs saved by builds that had the Smooth checkbox must not matter any more.
+  await sw.evaluate(() => chrome.storage.local.set({ editorPrefs: { smooth: true } }));
   const storedReviews = async () => {
     const all = await sw.evaluate(() => chrome.storage.local.get(null));
     return Object.entries(all)
@@ -70,7 +72,7 @@ try {
   const inject = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/smooth.js', 'content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'content.js'] });
     }, pageUrl);
   await inject();
   await page.waitForSelector('page-review-overlay');
@@ -111,6 +113,10 @@ try {
   await page.mouse.up();
 
   // Comments are Figma-style cards.
+  // Freehand stays as drawn: no smoothing, no Smooth checkbox.
+  assert.equal(await page.locator('page-review-overlay .toolbar input[type="checkbox"]').count(), 0);
+  const ringPath = await page.locator('page-review-overlay g[data-type="pen"] path').nth(1).getAttribute('d');
+  assert.ok((ringPath.match(/Q/g) ?? []).length >= 30, 'pen stroke keeps its points');
   const cards = page.locator('page-review-overlay .note-card');
   assert.equal(await cards.count(), 2);
   const box = (loc) => loc.boundingBox();
