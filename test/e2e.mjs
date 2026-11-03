@@ -72,7 +72,7 @@ try {
   const inject = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'content.js'] });
     }, pageUrl);
   await inject();
   await page.waitForSelector('page-review-overlay');
@@ -364,6 +364,19 @@ try {
   await page.keyboard.press('Control+Shift+z');
   assert.equal(await overlay('g[data-type="arrow"]').count(), 1, 'redo brings the arrow back');
   assert.equal(await overlay('.note-card').count(), 1, 'no empty comment left');
+
+  // Arrows are drawn with a gentle bend; the selected arrow's midpoint handle straightens it.
+  const arrowD = () => overlay('g[data-type="arrow"] path').nth(1).getAttribute('d');
+  const [x1, y1, qx, qy, x2, y2] = (await arrowD()).match(/^M(\S+) (\S+) Q(\S+) (\S+) (\S+) (\S+)/).slice(1).map(Number);
+  const mid = [(x1 + 2 * qx + x2) / 4, (y1 + 2 * qy + y2) / 4];
+  await page.keyboard.press('v');
+  await page.mouse.click(...mid); // on the curve: selects the arrow
+  const handle = await overlay('[data-handle="bend"]').boundingBox();
+  assert.ok(Math.abs(handle.x + handle.width / 2 - mid[0]) < 2 && Math.abs(handle.y + handle.height / 2 - mid[1]) < 2, 'handle at the curve midpoint');
+  await drag(mid, [(x1 + x2) / 2, (y1 + y2) / 2]); // onto the straight line
+  assert.doesNotMatch(await arrowD(), /Q/, 'dragged flat: straight');
+  await page.keyboard.press('Control+z');
+  assert.match(await arrowD(), /Q/, 'one undo restores the bend');
   page.once('dialog', (d) => d.accept());
   await inject(); // close (unsaved: confirm)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });

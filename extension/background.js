@@ -63,7 +63,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // content.js toggles itself when injected a second time.
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ['lib/notes.js', 'content.js'],
+      files: ['lib/notes.js', 'lib/arrows.js', 'content.js'],
     });
   } catch (err) {
     // chrome://, the Web Store, PDF viewer etc. can't be scripted.

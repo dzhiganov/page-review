@@ -35,6 +35,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Comment on a mark | Finish an arrow or box and type; **Enter** adds it, **Esc** skips it |
 | Move | Select tool → drag. Comments can be dragged with any tool. Arrow keys nudge (Shift = 10px) |
 | Delete | Select → **Delete**/Backspace, or the eraser |
+| Bend an arrow | Arrows come out slightly curved. Select one and drag the dot in its middle; drag it flat to straighten |
 | Edit a comment | Double-click it, or click it and use the bar next to it (text, font, size, bold, color, delete) |
 | Undo / redo | **Ctrl/Cmd+Z** · **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** (any keyboard layout) |
 | Save | **Ctrl/Cmd+S** |

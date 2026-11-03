@@ -7,6 +7,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
+  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough } = globalThis.PageReviewArrows;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -55,6 +56,7 @@
     :host([data-tool="eraser"]) .stage { cursor: cell; }
     .canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     :host([data-tool="select"]) .canvas [data-id] { cursor: move; }
+    .canvas .bend-handle { cursor: grab; pointer-events: all; }
     .notes { position: absolute; inset: 0; pointer-events: none; }
     .frame { position: fixed; inset: 0; border: 3px solid #7048e8; pointer-events: none; }
 
@@ -170,6 +172,7 @@
     selected: null, // shape id
     drawing: null,
     drag: null,
+    bendDrag: null, // dragging a selected arrow's midpoint handle
     erasing: false,
     textInput: null,
     skipClick: false,
@@ -398,6 +401,11 @@
     }
     const x = e.clientX;
     const y = e.clientY;
+    if (e.target.closest?.('[data-handle="bend"]') && selectedShape()?.type === 'arrow') {
+      state.bendDrag = { shape: selectedShape(), moved: false };
+      stage.setPointerCapture(e.pointerId);
+      return;
+    }
     const hit = shapeAt(e.target);
     if (state.tool === 'eraser') {
       state.erasing = true;
@@ -429,6 +437,17 @@
   function onPointerMove(e) {
     const x = e.clientX;
     const y = e.clientY;
+    if (state.bendDrag) {
+      const { shape } = state.bendDrag;
+      if (!state.bendDrag.moved) {
+        pushHistory();
+        state.bendDrag.moved = true;
+      }
+      setBend(shape, bendThrough(shape, x, y));
+      renderShape(shape);
+      renderSelection();
+      return;
+    }
     const drag = state.drag;
     if (drag) {
       if (!drag.moved) {
@@ -449,7 +468,10 @@
     const s = state.drawing;
     if (!s) return;
     if (s.type === 'pen') s.points.push([x, y]);
-    else if (s.type === 'arrow') Object.assign(s, { x2: x, y2: y });
+    else if (s.type === 'arrow') {
+      Object.assign(s, { x2: x, y2: y });
+      setBend(s, defaultBend(s)); // drawn with a gentle curve; short ones stay straight
+    }
     else if (s.type === 'rect') {
       Object.assign(s, { x: Math.min(s.ox, x), y: Math.min(s.oy, y), w: Math.abs(x - s.ox), h: Math.abs(y - s.oy) });
     }
@@ -458,6 +480,14 @@
 
   function onPointerUp() {
     state.erasing = false;
+    if (state.bendDrag) {
+      if (state.bendDrag.moved) {
+        state.dirty = true;
+        state.skipClick = true;
+      }
+      state.bendDrag = null;
+      return;
+    }
     if (state.drag) {
       if (state.drag.moved) {
         state.dirty = true;
@@ -533,8 +563,13 @@
     }
   }
 
-  function isCurved(s) {
-    return Number.isFinite(s.cx) && Number.isFinite(s.cy);
+  // Sets an arrow's control point, or makes it straight when `c` is null.
+  function setBend(s, c) {
+    if (c) Object.assign(s, c);
+    else {
+      delete s.cx;
+      delete s.cy;
+    }
   }
 
   function select(id) {
@@ -898,6 +933,16 @@
         stroke: '#7048e8', 'stroke-width': 1.5, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
       }),
     );
+    // Drag the midpoint to change the bend; drag it onto the straight line to straighten.
+    if (s.type === 'arrow') {
+      const [hx, hy] = arrowMidpoint(s);
+      selectionLayer.appendChild(
+        svgEl('circle', {
+          cx: hx, cy: hy, r: 5, fill: '#fff', stroke: '#7048e8', 'stroke-width': 1.5,
+          class: 'bend-handle', 'data-handle': 'bend',
+        }),
+      );
+    }
   }
 
   function penPath(points) {
