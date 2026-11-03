@@ -9,6 +9,8 @@
   const MIN_BEND_LENGTH = 48; // shorter arrows stay straight
   const FLAT_PX = 3; // a handle dragged this close to the straight line makes the arrow straight
   const GAP_PX = 6; // space between an arrow's tail and its comment card
+  const HEAD_ANGLE = (32 * Math.PI) / 180; // each arm's angle to the shaft
+  const HEAD_ARM = 4.5; // arm length, in stroke widths
 
   const round = (v) => Math.round(v * 10) / 10;
 
@@ -118,5 +120,35 @@
     return rel ? { x1: tail.x1, y1: tail.y1, cx: tail.cx, cy: tail.cy } : { x1: tail.x1, y1: tail.y1 };
   }
 
-  globalThis.PageReviewArrows = { isCurved, defaultBend, midpoint, bendThrough, relativeBend, applyRelativeBend, borderDistance, tailForCard, GAP_PX };
+  // Open chevron head (a Figma-style "line arrow") for an arrow drawn with stroke `width` and
+  // round caps and joins. Both arms meet at `apex`, half a stroke back from the endpoint, so
+  // the rounded tip lands exactly on (x2, y2); the shaft should end at `apex` too. The head
+  // follows the curve's tangent at the end, and shrinks on very short arrows.
+  function arrowHead(a, width) {
+    const [fx, fy] = isCurved(a) ? [a.cx, a.cy] : [a.x1, a.y1];
+    let dx = a.x2 - fx;
+    let dy = a.y2 - fy;
+    if (!Math.hypot(dx, dy)) [dx, dy] = [a.x2 - a.x1, a.y2 - a.y1];
+    const len = Math.hypot(dx, dy) || 1;
+    const e = [dx / len, dy / len];
+    const total = Math.hypot(a.x2 - a.x1, a.y2 - a.y1);
+    const arm = Math.min(HEAD_ARM * width, Math.max(total * 0.4, width * 2));
+    const apex = [a.x2 - (e[0] * width) / 2, a.y2 - (e[1] * width) / 2];
+    // Arms: the backwards direction turned by +/- HEAD_ANGLE.
+    const arm2 = (sign) => {
+      const [c, s] = [Math.cos(HEAD_ANGLE), Math.sin(HEAD_ANGLE) * sign];
+      return [apex[0] + arm * (-e[0] * c + e[1] * s), apex[1] + arm * (-e[1] * c - e[0] * s)];
+    };
+    return { apex, left: arm2(1), right: arm2(-1), arm };
+  }
+
+  // SVG path data for the whole arrow: shaft to the apex, then the chevron, one stroke width.
+  function arrowPathData(a, width) {
+    const { apex, left, right } = arrowHead(a, width);
+    const p = (pt) => `${round(pt[0])} ${round(pt[1])}`;
+    const shaft = isCurved(a) ? `M${a.x1} ${a.y1} Q${a.cx} ${a.cy} ${p(apex)}` : `M${a.x1} ${a.y1} L${p(apex)}`;
+    return `${shaft} M${p(left)} L${p(apex)} L${p(right)}`;
+  }
+
+  globalThis.PageReviewArrows = { isCurved, defaultBend, midpoint, bendThrough, relativeBend, applyRelativeBend, borderDistance, tailForCard, GAP_PX, arrowHead, arrowPathData };
 })();

@@ -123,3 +123,48 @@ test('no tail change when the head is on the card', () => {
   assert.equal(A.tailForCard({ x1: 0, y1: 0, x2: 150, y2: 120 }, card(100, 100), R), null);
   assert.equal(A.tailForCard({ x1: 0, y1: 0, x2: 96, y2: 120 }, card(100, 100), R), null, 'within the gap');
 });
+
+// ---------- arrowhead ----------
+
+const deg = (v) => (Math.atan2(v[1], v[0]) * 180) / Math.PI;
+const sub = (p, q) => [p[0] - q[0], p[1] - q[1]];
+const angleBetween = (u, v) => {
+  const d = Math.abs(deg(u) - deg(v)) % 360;
+  return d > 180 ? 360 - d : d;
+};
+
+test('chevron head: tip on the endpoint, symmetric 32° arms of 4.5 stroke widths', () => {
+  for (const width of [2, 3, 6]) {
+    const a = { x1: 100, y1: 300, x2: 400, y2: 200 };
+    const { apex, left, right, arm } = A.arrowHead(a, width);
+    const back = sub([a.x1, a.y1], [a.x2, a.y2]);
+    // The round join reaches half a stroke past the apex: exactly the endpoint.
+    const tip = [apex[0] - (back[0] / Math.hypot(...back)) * (width / 2), apex[1] - (back[1] / Math.hypot(...back)) * (width / 2)];
+    assert.ok(near(tip[0], 400, 1e-9) && near(tip[1], 200, 1e-9), `tip at the endpoint (width ${width})`);
+    assert.ok(near(arm, 4.5 * width, 1e-9), 'arm scales with the stroke');
+    assert.ok(near(Math.hypot(...sub(left, apex)), arm, 1e-9) && near(Math.hypot(...sub(right, apex)), arm, 1e-9), 'equal arms');
+    assert.ok(near(angleBetween(sub(left, apex), back), 32, 1e-6), 'left arm at 32°');
+    assert.ok(near(angleBetween(sub(right, apex), back), 32, 1e-6), 'right arm at 32°');
+    assert.ok(near(angleBetween(sub(left, apex), sub(right, apex)), 64, 1e-6), 'one on each side');
+  }
+});
+
+test('a curved arrow points along the curve at its end, not along the chord', () => {
+  const a = { x1: 0, y1: 0, x2: 200, y2: 0, cx: 100, cy: -100 }; // arrives heading down-right
+  const { apex, left, right } = A.arrowHead(a, 3);
+  const axis = [(left[0] + right[0]) / 2 - apex[0], (left[1] + right[1]) / 2 - apex[1]];
+  assert.ok(near(angleBetween(axis, [a.cx - a.x2, a.cy - a.y2]), 0, 1e-6), 'head axis on the end tangent');
+  assert.ok(angleBetween(axis, [-1, 0]) > 40, 'not the chord');
+});
+
+test('short arrows get a smaller head', () => {
+  const { arm } = A.arrowHead({ x1: 0, y1: 0, x2: 20, y2: 0 }, 3);
+  assert.ok(arm <= 8 && arm >= 6, `arm ${arm}`);
+});
+
+test('path data: the shaft ends at the apex and the arms meet there', () => {
+  const a = { x1: 10, y1: 10, x2: 210, y2: 10 };
+  const d = A.arrowPathData(a, 3);
+  assert.match(d, /^M10 10 L208\.5 10 M\S+ \S+ L208\.5 10 L\S+ \S+$/);
+  assert.match(A.arrowPathData({ ...a, cx: 110, cy: -40 }, 3), /^M10 10 Q110 -40 \S+ \S+ M/);
+});

@@ -7,7 +7,7 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
-  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard } = globalThis.PageReviewArrows;
+  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard, arrowPathData } = globalThis.PageReviewArrows;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -15,6 +15,7 @@
   // A comment written right after a mark is almost always about that mark.
   const PREVIOUS_ATTACH_PX = 240;
   const NOTE_MAX_W = 280;
+  const STROKE_PX = 3; // drawings' stroke width
   const AVATAR_PX = 24;
   const CARD_RADIUS = 16; // .note-card border-radius; the corner at the pin is CARD_PIN_RADIUS
   const CARD_PIN_RADIUS = 4;
@@ -971,7 +972,7 @@
       shapesLayer.appendChild(g);
     }
     g.replaceChildren();
-    const stroke = { fill: 'none', stroke: s.color, 'stroke-width': 3, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
+    const stroke = { fill: 'none', stroke: s.color, 'stroke-width': STROKE_PX, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
     // Invisible wide stroke so thin lines are easy to grab and erase.
     const hit = { fill: 'none', stroke: 'transparent', 'stroke-width': 16, 'pointer-events': 'stroke' };
     if (s.type === 'pen') {
@@ -1026,16 +1027,9 @@
     return `${d} L${last[0]} ${last[1]}`;
   }
 
-  // Straight, or a quadratic curve when the arrow has a control point (cx, cy).
+  // Straight, or a quadratic curve when the arrow has a control point (cx, cy); open chevron head.
   function arrowPath(s) {
-    const { x1, y1, x2, y2 } = s;
-    const curved = isCurved(s);
-    const angle = curved ? Math.atan2(y2 - s.cy, x2 - s.cx) : Math.atan2(y2 - y1, x2 - x1);
-    const head = Math.min(18, Math.hypot(x2 - x1, y2 - y1) * 0.4);
-    const ax = (a) => x2 - head * Math.cos(angle + a);
-    const ay = (a) => y2 - head * Math.sin(angle + a);
-    const shaft = curved ? `M${x1} ${y1} Q${s.cx} ${s.cy} ${x2} ${y2}` : `M${x1} ${y1} L${x2} ${y2}`;
-    return `${shaft} M${ax(0.45)} ${ay(0.45)} L${x2} ${y2} L${ax(-0.45)} ${ay(-0.45)}`;
+    return arrowPathData(s, STROKE_PX);
   }
 
   function curvePoints(s, n = 16) {

@@ -1,6 +1,7 @@
 // Lays out and draws several screenshots as one image, following a template
 // (lib/templates.js). layoutComposition is pure, so it's unit-tested in Node;
 // drawComposition paints that layout on a 2D canvas context.
+import './arrows.js'; // globalThis.PageReviewArrows: the arrowhead shared with the page overlay
 
 export const FONT_FAMILY = 'Inter, "Segoe UI", system-ui, sans-serif';
 const MAX_SIDE = 2400; // common image height (row) or width (grid) is capped here...
@@ -120,16 +121,15 @@ export function drawComposition(ctx, layout, images, template) {
     ctx.lineCap = 'round';
     ctx.beginPath();
     if (c.type === 'arrow') {
-      const head = c.width * 3;
+      // Same open chevron head as the arrows drawn on the page.
+      const { apex, left, right } = globalThis.PageReviewArrows.arrowHead(c, c.width);
+      ctx.lineJoin = 'round';
       ctx.moveTo(c.x1, c.y1);
-      ctx.lineTo(c.x2 - head, c.y2);
+      ctx.lineTo(...apex);
+      ctx.moveTo(...left);
+      ctx.lineTo(...apex);
+      ctx.lineTo(...right);
       ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(c.x2, c.y2);
-      ctx.lineTo(c.x2 - head * 1.6, c.y2 - head);
-      ctx.lineTo(c.x2 - head * 1.6, c.y2 + head);
-      ctx.closePath();
-      ctx.fill();
     } else {
       ctx.moveTo(c.x1, c.y1);
       ctx.lineTo(c.x2, c.y2);

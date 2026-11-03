@@ -392,7 +392,9 @@ try {
   await page.keyboard.press('v');
   await drag([fb.x + fb.width / 2, fb.y + fb.height / 2], [fb.x + fb.width / 2 + 60, fb.y + fb.height / 2 + 40]);
   const [t1x, t1y, h1x, h1y] = await ends();
-  assert.deepEqual([h1x, h1y], [h0x, h0y], 'arrow head stays on its target');
+  // The path's shaft ends at the head's apex, half a stroke before the endpoint, along the
+  // tangent: so it may turn a little about the fixed endpoint, but never by more than a stroke.
+  assert.ok(Math.hypot(h1x - h0x, h1y - h0y) <= 3.01, 'arrow head stays on its target');
   // The tail sits just outside the moved card, aimed along its tangent at the card's centre.
   const fc = await follow.boundingBox();
   const [qx1, qy1] = (await followArrow.getAttribute('d')).match(/ Q(\S+) (\S+)/).slice(1).map(Number);
