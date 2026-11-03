@@ -16,6 +16,9 @@
   // A comment written right after a mark is almost always about that mark.
   const PREVIOUS_ATTACH_PX = 240;
   const NOTE_MAX_W = 280;
+  const AVATAR_PX = 24;
+  const TEXT_PAD_Y = 4; // .text / textarea vertical padding
+  const NOTE_CHROME_W = 10 + AVATAR_PX + 8 + 14; // card padding + avatar + gap
   const EDGE_PX = 12;
   const HISTORY_LIMIT = 100;
 
@@ -59,24 +62,24 @@
 
     .note-card {
       position: absolute; pointer-events: auto; display: flex; align-items: flex-start; gap: 8px;
-      max-width: ${NOTE_MAX_W}px; padding: 6px 14px 6px 6px; background: #fff; color: #1e1e1e;
-      border-radius: 20px 20px 20px 4px; user-select: none; cursor: grab;
+      max-width: ${NOTE_MAX_W}px; padding: 8px 14px 8px 10px; background: #fff; color: #1e1e1e;
+      border-radius: 16px 16px 16px 4px; user-select: none; cursor: grab;
       box-shadow: 0 0 0 1px rgba(0,0,0,.06), 0 2px 6px rgba(0,0,0,.08), 0 10px 28px rgba(0,0,0,.18);
       font: 14px/20px Inter, "Segoe UI", system-ui, -apple-system, sans-serif; letter-spacing: -0.005em;
     }
-    .note-card.flip-x { border-radius: 20px 20px 4px 20px; }
-    .note-card.flip-y { border-radius: 4px 20px 20px 20px; }
-    .note-card.flip-x.flip-y { border-radius: 20px 4px 20px 20px; }
+    .note-card.flip-x { border-radius: 16px 16px 4px 16px; }
+    .note-card.flip-y { border-radius: 4px 16px 16px 16px; }
+    .note-card.flip-x.flip-y { border-radius: 16px 4px 16px 16px; }
     :host([data-tool="text"]) .note-card { cursor: text; }
     :host([data-tool="eraser"]) .note-card { cursor: cell; }
     .note-card.selected { box-shadow: 0 0 0 2px #7048e8, 0 10px 28px rgba(0,0,0,.2); }
     .note-card.editing { cursor: default; box-shadow: 0 0 0 1.5px #18181b, 0 10px 28px rgba(0,0,0,.2); }
     .note-card .avatar {
-      flex: none; width: 28px; height: 28px; border-radius: 50%; background: #18181b; color: #fff;
-      display: grid; place-items: center; font: 700 13px/1 Inter, "Segoe UI", system-ui, sans-serif;
+      flex: none; width: ${AVATAR_PX}px; height: ${AVATAR_PX}px; border-radius: 50%; background: #18181b; color: #fff;
+      display: grid; place-items: center; font: 700 12px/1 Inter, "Segoe UI", system-ui, sans-serif;
       box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.35);
     }
-    .note-card .avatar svg { width: 15px; height: 15px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+    .note-card .avatar svg { width: 13px; height: 13px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
     .note-card .avatar.photo { position: relative; }
     .note-card .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
     .note-card .avatar .n {
@@ -84,9 +87,9 @@
       border-radius: 9px; background: #18181b; color: #fff; font: 700 11px/18px Inter, "Segoe UI", system-ui, sans-serif;
       text-align: center; box-shadow: 0 0 0 1.5px #fff;
     }
-    .note-card .text { padding: 4px 0; max-width: ${NOTE_MAX_W - 54}px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .note-card .text { padding: 4px 0; max-width: ${NOTE_MAX_W - NOTE_CHROME_W}px; white-space: pre-wrap; overflow-wrap: anywhere; }
     .note-card textarea {
-      all: unset; display: block; padding: 4px 0; min-width: 180px; max-width: ${NOTE_MAX_W - 54}px;
+      all: unset; display: block; padding: 4px 0; min-width: 180px; max-width: ${NOTE_MAX_W - NOTE_CHROME_W}px;
       field-sizing: content; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: inherit; cursor: text;
     }
     .note-card textarea::placeholder { color: #8a8a93; font-weight: 400; }
@@ -793,7 +796,11 @@
 
   function styleNoteBody(el, s) {
     const body = el.querySelector('textarea, .text');
-    Object.assign(body.style, noteCss(s.font), { maxWidth: `${noteMaxWidth(s.font) - 54}px` });
+    Object.assign(body.style, noteCss(s.font), { maxWidth: `${noteMaxWidth(s.font) - NOTE_CHROME_W}px` });
+    // Centre the avatar on the first line of text, whichever of the two is taller.
+    const line = parseFloat(noteCss(s.font).lineHeight) + TEXT_PAD_Y * 2;
+    el.querySelector('.avatar').style.marginTop = `${Math.max(0, (line - AVATAR_PX) / 2)}px`;
+    body.style.marginTop = `${Math.max(0, (AVATAR_PX - line) / 2)}px`;
     el.style.maxWidth = `${noteMaxWidth(s.font)}px`;
   }
 
