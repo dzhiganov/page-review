@@ -79,7 +79,7 @@ ${where.join('\n')}
 
 One folder per review, \`reviews/<id>/\`:
 
-- \`review.md\`: the comments, numbered to match the badges in the screenshot. Start here.
+- \`review.md\`: the comments, numbered to match the badges in the screenshot, then any steps. Start here.
 - \`screenshot.png\`: the visible part of the page as the user saw it (or the area they framed), with their drawings and numbered badges baked in.
 - \`review.json\`: the same data, structured (fields below).
 
@@ -109,6 +109,9 @@ const READING = `## Reading a review
    renders that element.
 3. A comment without text means the drawing itself is the feedback (for example, an element circled or crossed out):
    infer the intent from the screenshot.
+4. **Steps** (filled purple number badges, listed under "Steps") are an ordered sequence the user marked, such as
+   the clicks to reproduce a bug or a flow to build. Follow them in order; each is linked to the element under its
+   pin. Step numbers are separate from comment numbers.
 
 ## How comments map to elements
 
@@ -132,6 +135,8 @@ const READING = `## Reading a review
   - \`target\`: \`selector\` (CSS path, unique on the page at capture time), \`tag\`, \`id\`, \`classes\`, \`role\`,
     \`ariaLabel\`, \`text\` (first 200 characters), \`rect\` (\`x\`, \`y\`, \`w\`, \`h\` in viewport CSS px),
     \`styles\` (computed: font, color, spacing, size), \`ancestors\` (nearest first), \`html\` (outerHTML, truncated).
+- \`steps[]\` (may be missing): \`n\` (the step number), \`kind: "step"\`, \`text\`, \`region\`, \`badge\` and \`target\` as
+  for comments.
 - \`shapes\`: the raw drawings. Rarely needed.
 - \`composite\` (combined images only, see below).
 

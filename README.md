@@ -30,12 +30,13 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Action | How |
 | --- | --- |
 | Start / stop reviewing | Click the icon or **Alt+Shift+R** |
-| Tools | **V** select/move · **P** pen · **A** arrow · **R** box · **T** comment · **E** eraser |
+| Tools | **V** select/move · **P** pen · **A** arrow · **R** box · **T** comment · **S** step · **E** eraser · **F** frame |
 | Colors | **1–6** (also recolors the selected drawing) |
 | Comment on a mark | Finish an arrow or box and type; **Enter** adds it, **Esc** skips it |
 | Move | Select tool → drag any mark (a box from anywhere inside it); a selected arrow has handles at both ends, a box at its corners. Comments can be dragged with any tool; a comment on an arrow takes the arrow's tail with it. Arrow keys nudge (Shift = 10px) |
 | Delete | Select → **Delete**/Backspace, or the eraser |
 | Bend an arrow | Arrows come out slightly curved. Select one and drag the dot in its middle; drag it flat to straighten |
+| Steps | **S**, then click: a card like a comment with a number (1, 2, 3…) instead of your avatar, for an ordered sequence such as the clicks to reproduce a bug. Numbers follow the order you added them; deleting one renumbers the rest. Saved as a separate *Steps* list |
 | Edit a comment | Double-click it, or click it and use the bar next to it (text, font, size, bold, color, delete) |
 | Show elements | The frame button keeps the elements your marks point at outlined, and outlines the one under the cursor |
 | Frame | **F**, then drag a rectangle: Save and Copy image capture only that area, outside it is dimmed. Drag inside it to move it, its corners to resize it. **Esc** (with the Frame tool) or the reset button above it goes back to the whole visible page. Lasts until you exit |

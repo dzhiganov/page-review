@@ -45,5 +45,19 @@
     };
   }
 
-  globalThis.PageReviewNotes = { FAMILIES, SIZES, DEFAULT_FONT, normalizeFont, stepSize, noteCss };
+  // Steps (cards with a number instead of an avatar) are numbered in creation order, which
+  // the shapes list keeps: a new shape is appended, editing or moving one keeps its place,
+  // undo and redo restore the whole list. So numbers are derived, never stored: a new step
+  // gets the highest number + 1, and deleting one renumbers the rest (1, 2, 4 -> 1, 2, 3).
+  function stepNumbers(shapes) {
+    const numbers = new Map();
+    for (const s of shapes) if (s.type === 'step') numbers.set(s.id, numbers.size + 1);
+    return numbers;
+  }
+
+  function nextStepNumber(shapes) {
+    return stepNumbers(shapes).size + 1;
+  }
+
+  globalThis.PageReviewNotes = { FAMILIES, SIZES, DEFAULT_FONT, normalizeFont, stepSize, noteCss, stepNumbers, nextStepNumber };
 })();

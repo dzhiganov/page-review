@@ -6,7 +6,7 @@
   }
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
+  const { DEFAULT_FONT, normalizeFont, stepSize, noteCss, stepNumbers, nextStepNumber } = globalThis.PageReviewNotes;
   const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard, arrowPathData, relativeBend, applyRelativeBend } =
     globalThis.PageReviewArrows;
   const { frameFrom, isFrame, moveFrame, fitFrame, itemsInFrame, cropItems } = globalThis.PageReviewFrame;
@@ -40,6 +40,7 @@
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
     edit: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    step: '<circle cx="12" cy="12" r="9"/><path d="M10.5 9 12.5 7.5V16.5"/>',
     frame: '<path d="M7 3v14h14"/><path d="M3 7h14v14"/>',
     reset: '<path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/>',
   };
@@ -51,6 +52,7 @@
     { id: 'arrow', code: 'KeyA', title: 'Arrow (A)' },
     { id: 'rect', code: 'KeyR', title: 'Box (R)' },
     { id: 'text', code: 'KeyT', title: 'Comment (T)' },
+    { id: 'step', code: 'KeyS', title: 'Step (S)', label: 'Step' },
     { id: 'eraser', code: 'KeyE', title: 'Eraser (E)' },
     { id: 'frame', code: 'KeyF', title: 'Frame (F)', label: 'Frame' },
   ];
@@ -60,7 +62,7 @@
     * { box-sizing: border-box; }
     .stage { position: fixed; inset: 0; cursor: crosshair; touch-action: none; }
     :host([data-tool="select"]) .stage { cursor: default; }
-    :host([data-tool="text"]) .stage { cursor: text; }
+    :host([data-tool="text"]) .stage, :host([data-tool="step"]) .stage { cursor: text; }
     :host([data-tool="eraser"]) .stage { cursor: cell; }
     .canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     :host([data-tool="select"]) .canvas [data-id] { cursor: move; }
@@ -99,7 +101,7 @@
     .note-card.flip-x { border-radius: 16px 16px 4px 16px; }
     .note-card.flip-y { border-radius: 4px 16px 16px 16px; }
     .note-card.flip-x.flip-y { border-radius: 16px 4px 16px 16px; }
-    :host([data-tool="text"]) .note-card { cursor: text; }
+    :host([data-tool="text"]) .note-card, :host([data-tool="step"]) .note-card { cursor: text; }
     :host([data-tool="eraser"]) .note-card { cursor: cell; }
     .note-card.selected { box-shadow: 0 0 0 2px #7048e8, 0 10px 28px rgba(0,0,0,.2); }
     .note-card.editing { cursor: default; box-shadow: 0 0 0 1.5px #18181b, 0 10px 28px rgba(0,0,0,.2); }
@@ -108,6 +110,8 @@
       display: grid; place-items: center; font: 700 12px/1 Inter, "Segoe UI", system-ui, sans-serif;
       box-shadow: inset 0 0 0 1.5px rgba(255,255,255,.35);
     }
+    /* A step's number: the avatar's circle, filled with the accent so steps stand apart from comments. */
+    .note-card .avatar.step { background: #7048e8; font-variant-numeric: tabular-nums; }
     .note-card .avatar svg { width: 13px; height: 13px; fill: none; stroke: #fff; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
     .note-card .avatar.photo { position: relative; }
     .note-card .avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
@@ -400,7 +404,7 @@
       b.setAttribute('aria-pressed', String(b.dataset.color === c));
     }
     const sel = selectedShape();
-    if (sel && sel.type !== 'text' && sel.color !== c) {
+    if (sel && !isCard(sel) && sel.color !== c) {
       pushHistory();
       sel.color = c;
       renderShape(sel);
@@ -461,7 +465,7 @@
     if (state.textInput) {
       commitText();
       // With the Comment tool a click elsewhere just finishes the comment; other tools carry on.
-      if (state.tool === 'text') {
+      if (isCardTool(state.tool)) {
         state.skipClick = true;
         return;
       }
@@ -491,7 +495,7 @@
     }
     // Anything can be dragged with the Select tool; comment cards with any tool
     // (with the Comment tool, a click without dragging edits the comment).
-    if (hit && (state.tool === 'select' || hit.type === 'text')) {
+    if (hit && (state.tool === 'select' || isCard(hit))) {
       select(hit.id);
       state.drag = { shape: hit, x, y, moved: false };
       stage.setPointerCapture(e.pointerId);
@@ -501,7 +505,7 @@
       select(null);
       return;
     }
-    if (state.tool === 'text') return; // handled on click so the textarea keeps focus
+    if (isCardTool(state.tool)) return; // handled on click so the textarea keeps focus
     select(null);
     stage.setPointerCapture(e.pointerId);
     const base = { id: uid(), type: state.tool, color: state.color };
@@ -535,7 +539,7 @@
       }
       move(drag.shape, x - drag.x, y - drag.y);
       Object.assign(drag, { x, y });
-      if (drag.shape.type === 'text') updatePinHint(drag.shape);
+      if (isCard(drag.shape)) updatePinHint(drag.shape);
       renderSelection();
       return;
     }
@@ -573,9 +577,9 @@
       if (state.drag.moved) {
         state.dirty = true;
         state.skipClick = true;
-        if (state.drag.shape.type !== 'text') showHint(state.drag.shape);
+        if (!isCard(state.drag.shape)) showHint(state.drag.shape);
         else endPinHint();
-      } else if (state.drag.shape.type === 'text') {
+      } else if (isCard(state.drag.shape)) {
         state.pressedNote = state.drag.shape.id;
       }
       state.drag = null;
@@ -607,15 +611,15 @@
       state.skipClick = false;
       return;
     }
-    if (state.tool !== 'text' || e.target.closest('textarea')) return;
+    if (!isCardTool(state.tool) || e.target.closest('textarea')) return;
     const hit = clickedShape(e);
-    if (hit?.type === 'text') openNoteEditor(hit);
-    else openNoteEditor(null, e.clientX, e.clientY);
+    if (isCard(hit)) openNoteEditor(hit);
+    else openNoteEditor(null, e.clientX, e.clientY, null, state.tool);
   }
 
   function onStageDblClick(e) {
     const hit = clickedShape(e);
-    if (hit?.type === 'text' && !state.textInput) openNoteEditor(hit);
+    if (isCard(hit) && !state.textInput) openNoteEditor(hit);
   }
 
   // A comment pressed without dragging captured the pointer, so its click lands on the stage.
@@ -630,7 +634,7 @@
       if (isCurved(s)) Object.assign(s, { cx: s.cx + dx, cy: s.cy + dy });
     }
     else if (s.type === 'rect') Object.assign(s, { x: s.x + dx, y: s.y + dy });
-    else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
+    else if (isCard(s)) Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
   }
 
   // One step of dragging a handle: an arrow's tail, head or bend, or a box corner.
@@ -665,7 +669,7 @@
   function move(s, dx, dy) {
     translate(s, dx, dy);
     renderShape(s);
-    if (s.type === 'text') return;
+    if (isCard(s)) return;
     for (const note of state.shapes) {
       if (note.type === 'text' && note.mark === s.id) {
         translate(note, dx, dy);
@@ -704,6 +708,7 @@
     state.shapes = state.shapes.filter((s) => s !== shape);
     nodes.get(shape.id)?.remove();
     nodes.delete(shape.id);
+    renumberSteps();
     if (state.selected === shape.id) select(null);
     state.dirty = state.shapes.length > 0;
   }
@@ -777,12 +782,34 @@
 
   // ---------- comment cards ----------
 
+  // Comment cards and step cards: the same card, with an avatar or a step number.
+  function isCard(s) {
+    return s?.type === 'text' || s?.type === 'step';
+  }
+
+  function isCardTool(tool) {
+    return tool === 'text' || tool === 'step';
+  }
+
+  // Number shown on a step card: its place among the steps, or the next one for a new step.
+  function stepNumber(s) {
+    return stepNumbers(state.shapes).get(s.id) ?? nextStepNumber(state.shapes);
+  }
+
+  function renumberSteps() {
+    for (const [id, n] of stepNumbers(state.shapes)) {
+      const badge = nodes.get(id)?.querySelector('.avatar.step');
+      if (badge) badge.textContent = String(n);
+    }
+  }
+
   // A Figma-style comment: avatar pin + card, whose sharp corner sits on the clicked spot.
-  // `mark` attaches a new comment to the arrow or box it was started from.
-  function openNoteEditor(existing, ax, ay, mark) {
+  // `mark` attaches a new comment to the arrow or box it was started from. `type` 'step'
+  // makes a step card instead.
+  function openNoteEditor(existing, ax, ay, mark, type = 'text') {
     const shape = existing
       ? { ...existing, font: normalizeFont(existing.font) }
-      : { id: uid(), type: 'text', ax, ay, text: '', font: { ...state.noteFont }, ...(mark ? { mark } : {}) };
+      : { id: uid(), type, ax, ay, text: '', font: { ...state.noteFont }, ...(mark ? { mark } : {}) };
     if (existing) {
       nodes.get(existing.id)?.remove();
       nodes.delete(existing.id);
@@ -858,6 +885,7 @@
       renderShape(shape);
       showHint(shape); // a standalone comment: the element under its pin
     }
+    renumberSteps();
     state.dirty = true;
     updateNoteTools();
   }
@@ -919,7 +947,7 @@
   function noteToolsTarget() {
     if (state.textInput) return state.textInput.shape;
     const sel = selectedShape();
-    return sel?.type === 'text' ? sel : null;
+    return isCard(sel) ? sel : null;
   }
 
   // The bar follows its card's size: a new card scales in, its avatar image loads, its text
@@ -1002,11 +1030,14 @@
     const el = document.createElement('div');
     el.className = editing ? 'note-card editing' : 'note-card';
     el.dataset.id = s.id;
-    el.dataset.type = 'text';
+    el.dataset.type = s.type;
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
     avatar.innerHTML = icon('text');
-    if (avatarSrc) {
+    if (s.type === 'step') {
+      avatar.classList.add('step');
+      avatar.textContent = String(stepNumber(s));
+    } else if (avatarSrc) {
       const img = document.createElement('img');
       img.alt = '';
       img.onerror = () => {
@@ -1111,10 +1142,11 @@
 
   function renderShape(s) {
     scheduleOutlines();
-    if (s.type === 'text') {
+    if (isCard(s)) {
       let el = nodes.get(s.id);
       if (el) {
         el.querySelector('.text').textContent = s.text;
+        if (s.type === 'step') el.querySelector('.avatar').textContent = String(stepNumber(s));
         styleNoteBody(el, s);
       } else {
         el = noteCard(s, false);
@@ -1154,7 +1186,7 @@
     updateNoteTools();
     const s = selectedShape();
     if (!s) return;
-    if (s.type === 'text') {
+    if (isCard(s)) {
       nodes.get(s.id)?.classList.add('selected');
       return;
     }
@@ -1205,7 +1237,7 @@
   // ---------- linking drawings to DOM elements ----------
 
   function boxOf(s) {
-    if (s.type === 'rect' || s.type === 'text') return { x: s.x, y: s.y, w: s.w, h: s.h };
+    if (s.type === 'rect' || isCard(s)) return { x: s.x, y: s.y, w: s.w, h: s.h };
     if (s.type === 'arrow' && !isCurved(s)) {
       return { x: Math.min(s.x1, s.x2), y: Math.min(s.y1, s.y2), w: Math.abs(s.x2 - s.x1), h: Math.abs(s.y2 - s.y1) };
     }
@@ -1280,7 +1312,7 @@
   }
 
   function buildComments() {
-    const marks = state.shapes.filter((s) => s.type !== 'text');
+    const marks = state.shapes.filter((s) => !isCard(s));
     const texts = state.shapes.filter((s) => s.type === 'text');
     const groups = marks.map((m) => ({ marks: [m], texts: [], reversed: new Set() }));
     const groupOf = (m) => groups.find((g) => g.marks.includes(m));
@@ -1325,6 +1357,27 @@
     comments.sort((a, b) => a.badge.y - b.badge.y || a.badge.x - b.badge.x);
     comments.forEach((c, i) => (c.n = i + 1));
     return comments;
+  }
+
+  // Steps, in order, each with the element under its pin (like a standalone comment). With a
+  // frame, steps outside it are left out; the rest keep the number shown on their card.
+  function buildSteps() {
+    const numbers = stepNumbers(state.shapes);
+    const steps = state.shapes
+      .filter((s) => s.type === 'step')
+      .map((s) => {
+        const el = linkedElement(s);
+        return {
+          n: numbers.get(s.id),
+          kind: 'step',
+          text: s.text,
+          region: roundBox(boxOf(s)),
+          badge: { x: Math.round(s.ax), y: Math.round(s.ay) },
+          shapeIds: [s.id],
+          target: el ? describe(el) : null,
+        };
+      });
+    return state.crop ? itemsInFrame(state.crop, steps, state.shapes, boxOf) : steps;
   }
 
   const TOUCH_PX = 16;
@@ -1472,7 +1525,7 @@
   // standalone comment's pin. A comment attached to a mark has none of its own: it is about
   // its mark's element, never what happens to sit under the card.
   function linkedElement(s) {
-    if (s.type !== 'text') return targetOf(s, false);
+    if (!isCard(s)) return targetOf(s, false);
     return s.mark ? null : (elementsAt(s.ax, s.ay)[0] ?? null);
   }
 
@@ -1541,7 +1594,7 @@
   function onHover(e) {
     if (!state.outlines) return;
     // Nothing under a comment card lights up, not even while the card is dragged.
-    const draggingNote = state.drag?.shape.type === 'text';
+    const draggingNote = isCard(state.drag?.shape);
     const over = e.type === 'pointermove' && !draggingNote && !e.target.closest?.('.note-card');
     state.hover = over ? { x: e.clientX, y: e.clientY } : null;
     scheduleOutlines();
@@ -1565,9 +1618,9 @@
     if (state.outlines) {
       for (const s of state.shapes) {
         const el = linkedElement(s);
-        if (el && !found.has(el)) found.set(el, s.type === 'text' ? HOVER_COLOR : s.color);
+        if (el && !found.has(el)) found.set(el, isCard(s) ? HOVER_COLOR : s.color);
       }
-      const hovered = state.hover && state.drag?.shape.type !== 'text' && elementsAt(state.hover.x, state.hover.y)[0];
+      const hovered = state.hover && !isCard(state.drag?.shape) && elementsAt(state.hover.x, state.hover.y)[0];
       if (hovered && !found.has(hovered)) found.set(hovered, HOVER_COLOR);
     }
     outlinesEl.replaceChildren(
@@ -1667,11 +1720,13 @@
     }
     state.saving = true;
     const crop = cropSpec();
+    const steps = buildSteps();
     const comments = await enterCapture();
     try {
       // With a frame the image is cropped to it: marks outside it are left out, and the
       // coordinates are moved to match the image.
-      const framed = crop ? cropItems(crop.frame, comments, state.shapes, boxOf) : { items: comments, shapes: state.shapes };
+      const items = [...comments, ...steps];
+      const framed = crop ? cropItems(crop.frame, items, state.shapes, boxOf) : { items, shapes: state.shapes };
       const review = {
         id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         url: location.href,
@@ -1680,7 +1735,8 @@
         viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
         scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
         ...(crop ? { frame: crop.frame } : {}),
-        comments: framed.items,
+        comments: framed.items.filter((c) => c.kind !== 'step'),
+        steps: framed.items.filter((c) => c.kind === 'step'),
         shapes: framed.shapes,
       };
       const res = await chrome.runtime.sendMessage({ type: 'save', review, crop });
@@ -1688,7 +1744,7 @@
       state.dirty = false;
       host.classList.remove('capturing');
       const n = comments.length;
-      const what = `${n} comment${n === 1 ? '' : 's'}`;
+      const what = `${n} comment${n === 1 ? '' : 's'}${steps.length ? `, ${steps.length} step${steps.length === 1 ? '' : 's'}` : ''}`;
       const message =
         res.synced === true
           ? `Saved ${what} and sent to Claude.`
@@ -1792,7 +1848,7 @@
       move(sel, NUDGE[e.key][0] * step, NUDGE[e.key][1] * step);
       renderSelection();
       state.dirty = true;
-    } else if (sel && plain && e.key === 'Enter' && sel.type === 'text') openNoteEditor(sel);
+    } else if (sel && plain && e.key === 'Enter' && isCard(sel)) openNoteEditor(sel);
     else if (tool) setTool(tool.id);
     else if (plain && /^Digit[1-6]$/.test(e.code)) setColor(COLORS[Number(e.code.slice(5)) - 1]);
     else handled = SCROLL_KEYS.has(e.key);

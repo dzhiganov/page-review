@@ -65,7 +65,22 @@ export function toMarkdown(review, screenshot = null) {
     if (styles) out.push(`- **Computed styles:** ${styles}`);
     out.push('', '````html', t.html, '````', '');
   }
+  out.push(...stepsSection(review));
   return out.join('\n');
+}
+
+// Steps: an ordered list, numbered like the purple step badges in the screenshot.
+function stepsSection(review) {
+  const steps = review.steps ?? [];
+  if (!steps.length) return [];
+  const out = [`## Steps (${steps.length})`, ''];
+  out.push('Steps the reviewer numbered on the page, in order (filled purple badges in the screenshot).', '');
+  for (const st of steps) {
+    out.push(`${st.n}. ${st.text ? st.text.replace(/\n/g, ' ') : '_(no text)_'}`);
+    out.push(`   - **Target:** ${st.target ? `\`${st.target.selector}\`${st.target.text ? ` "${st.target.text}"` : ''}` : 'none found'}`);
+  }
+  out.push('');
+  return out;
 }
 
 // A combined image (made on the reviews page from several reviews with a template).

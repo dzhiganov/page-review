@@ -700,6 +700,60 @@ try {
   await inject();
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
+  // Steps: cards numbered in creation order with a filled badge instead of the avatar.
+  // Deleting #2 renumbers the rest; undo/redo restore the numbers. Saved as their own list.
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const stepBtn = overlay('[data-tool="step"]');
+  assert.equal(await stepBtn.getAttribute('aria-label'), 'Step');
+  await stepBtn.click();
+  const buyStep = await page.locator('#buy').boundingBox();
+  const stepAt = [[buyStep.x + 10, buyStep.y + 10, 'Click Buy'], [700, 500, 'Second step'], [900, 620, 'Third step']];
+  for (const [x, y, text] of stepAt) {
+    await page.mouse.click(x, y);
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+  }
+  await page.keyboard.press('t');
+  await page.mouse.click(400, 680);
+  await page.keyboard.type('Just a comment');
+  await page.keyboard.press('Enter');
+  const stepBadges = async () =>
+    Object.fromEntries(
+      await overlay('.note-card[data-type="step"]').evaluateAll((els) =>
+        els.map((el) => [el.querySelector('.text').textContent, el.querySelector('.avatar.step').textContent]),
+      ),
+    );
+  assert.deepEqual(await stepBadges(), { 'Click Buy': '1', 'Second step': '2', 'Third step': '3' });
+  assert.equal(await overlay('.note-card[data-type="text"] .avatar.step').count(), 0, 'comments keep their avatar');
+  await page.keyboard.press('v');
+  await overlay('.note-card').filter({ hasText: 'Second step' }).locator('.text').click();
+  await page.keyboard.press('Delete');
+  assert.deepEqual(await stepBadges(), { 'Click Buy': '1', 'Third step': '2' }, 'renumbered after a delete');
+  await page.keyboard.press('Control+z');
+  assert.deepEqual(await stepBadges(), { 'Click Buy': '1', 'Second step': '2', 'Third step': '3' }, 'undo restores the numbers');
+  await page.keyboard.press('Control+Shift+z');
+  assert.deepEqual(await stepBadges(), { 'Click Buy': '1', 'Third step': '2' }, 'redo deletes again');
+  await page.keyboard.press('s');
+  await page.mouse.click(1000, 300);
+  assert.equal(await overlay('.note-card.editing .avatar.step').textContent(), '3', 'a new step is the highest + 1');
+  await page.keyboard.type('Last step');
+  await page.keyboard.press('Enter');
+  await page.screenshot({ path: path.join(outDir, '6-steps.png') });
+  await page.keyboard.press('Control+s');
+  await overlay('.toast').filter({ hasText: saved('1 comment, 3 steps') }).waitFor();
+  const stepped = (await storedReviews())[0];
+  fs.writeFileSync(path.join(outDir, '6-steps-captured.png'), Buffer.from(stepped.screenshot.split(',')[1], 'base64'));
+  assert.deepEqual(stepped.steps.map((st) => [st.n, st.kind, st.text]), [[1, 'step', 'Click Buy'], [2, 'step', 'Third step'], [3, 'step', 'Last step']]);
+  assert.equal(stepped.steps[0].target.selector, '#buy', 'a step links the element under its pin');
+  assert.deepEqual(stepped.comments.map((c) => [c.n, c.text]), [[1, 'Just a comment']], 'steps are not comments');
+  assert.deepEqual(stepped.shapes.filter((sh) => sh.type === 'step').map((sh) => sh.text), ['Click Buy', 'Third step', 'Last step']);
+  const steppedMd = AGENT ? fs.readFileSync(path.join(store.reviewDir(stepped.id), 'review.md'), 'utf8') : toMarkdown(stepped);
+  assert.match(steppedMd, /## Steps \(3\)\n[^]*\n1\. Click Buy\n {3}- \*\*Target:\*\* `#buy` "Buy course"\n2\. Third step\n[^]*\n3\. Last step\n/);
+  assert.ok(steppedMd.indexOf('> Just a comment') < steppedMd.indexOf('## Steps'), 'comments first, then steps');
+  await inject(); // close (saved)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
   // Frame: drag out a capture area, move and resize it; Esc or the reset button go back to the
   // full page. With a frame, Copy image and Save capture only that area, marks outside it are
   // left out and saved coordinates are relative to it.
