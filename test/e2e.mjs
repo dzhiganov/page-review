@@ -512,6 +512,68 @@ try {
   await inject(); // close (nothing drawn)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
+  // Moving marks with the Select tool: an arrow by its curve (its comment comes along), a box
+  // from inside, a freehand stroke by its line, arrow ends and box corners by their handles.
+  // Each drag is one undo step; drawing tools still draw over marks.
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const shapeBox = (type) => overlay(`g[data-type="${type}"]`).first().boundingBox();
+  const curveMid = async () => {
+    const d = await overlay('g[data-type="arrow"] path').nth(1).getAttribute('d');
+    const [x1, y1, qx, qy, x2, y2] = d.match(/^M(\S+) (\S+) Q(\S+) (\S+) (\S+) (\S+)/).slice(1).map(Number);
+    return [(x1 + 2 * qx + x2) / 4, (y1 + 2 * qy + y2) / 4];
+  };
+  await page.keyboard.press('a');
+  await drag([500, 650], [800, 500]);
+  await page.keyboard.type('Moves with its arrow');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('r');
+  await drag([900, 550], [1100, 700]);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('p');
+  await drag([350, 720], [650, 730]);
+  await page.keyboard.press('v');
+  const noteBefore = await overlay('.note-card').boundingBox();
+  const [a0, r0, p0] = [await shapeBox('arrow'), await shapeBox('rect'), await shapeBox('pen')];
+  const grabAt = await curveMid();
+  await drag(grabAt, [grabAt[0] - 40, grabAt[1] - 60]);
+  const a1 = await shapeBox('arrow');
+  assert.ok(Math.abs(a1.x - a0.x + 40) < 2 && Math.abs(a1.y - a0.y + 60) < 2, `arrow moved: ${JSON.stringify([a0, a1])}`);
+  const noteAfter = await overlay('.note-card').boundingBox();
+  assert.ok(Math.abs(noteAfter.x - noteBefore.x + 40) < 1 && Math.abs(noteAfter.y - noteBefore.y + 60) < 1, 'its comment came along');
+  assert.ok(await overlay('[data-handle="tail"]').isVisible() && await overlay('[data-handle="head"]').isVisible(), 'arrow end handles');
+  await drag([1000, 620], [1030, 600]); // inside the box
+  const r1 = await shapeBox('rect');
+  assert.ok(Math.abs(r1.x - r0.x - 30) < 1 && Math.abs(r1.y - r0.y + 20) < 1, 'box dragged from inside');
+  await drag([500, 725], [500, 760]); // on the stroke
+  const p1 = await shapeBox('pen');
+  assert.ok(Math.abs(p1.y - p0.y - 35) < 1, 'freehand stroke moved');
+  // Box corner handle resizes; arrow head handle moves the head only.
+  const se = await overlay('[data-handle="se"]').boundingBox().catch(() => null);
+  assert.equal(se, null, 'no box handles while the stroke is selected');
+  await page.mouse.click(1040, 640); // select the box
+  const corner = await overlay('[data-handle="se"]').boundingBox();
+  await drag([corner.x + 4.5, corner.y + 4.5], [corner.x + 54.5, corner.y + 24.5]);
+  const r2 = await shapeBox('rect');
+  assert.ok(Math.abs(r2.width - r1.width - 50) < 1.5 && Math.abs(r2.x - r1.x) < 1, 'box resized from its corner');
+  await page.keyboard.press('Control+z');
+  assert.ok(Math.abs((await shapeBox('rect')).width - r1.width) < 1, 'one undo per drag');
+  await page.keyboard.press('Control+z');
+  assert.ok(Math.abs((await shapeBox('pen')).y - p0.y) < 1, 'undo the stroke move');
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  assert.ok(Math.abs((await shapeBox('arrow')).x - a0.x) < 1, 'undo the arrow move');
+  assert.ok(Math.abs((await overlay('.note-card').boundingBox()).x - noteBefore.x) < 1, 'and its comment');
+  // A drawing tool over a mark draws a new one instead of dragging.
+  await page.keyboard.press('a');
+  await drag([1000, 620], [1150, 520]);
+  await page.keyboard.press('Escape');
+  assert.equal(await overlay('g[data-type="arrow"]').count(), 2, 'arrow drawn from inside the box');
+  assert.ok(Math.abs((await shapeBox('rect')).x - r0.x) < 1, 'box not moved by the arrow tool');
+  page.once('dialog', (d) => d.accept());
+  await inject();
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
   // Combine: drag one screenshot onto another, create a Before / After image from them.
   await reviewsPage.bringToFront();
   await reviewsPage.reload();

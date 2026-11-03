@@ -7,7 +7,8 @@
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
-  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard, arrowPathData } = globalThis.PageReviewArrows;
+  const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard, arrowPathData, relativeBend, applyRelativeBend } =
+    globalThis.PageReviewArrows;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
@@ -62,7 +63,10 @@
     :host([data-tool="eraser"]) .stage { cursor: cell; }
     .canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
     :host([data-tool="select"]) .canvas [data-id] { cursor: move; }
-    .canvas .bend-handle { cursor: grab; pointer-events: all; }
+    :host([data-tool="select"]) .canvas .hit-area { pointer-events: all; } /* grab a box anywhere inside */
+    .canvas .handle { pointer-events: all; fill: #fff; stroke: #7048e8; stroke-width: 1.5; cursor: grab; }
+    .canvas .handle[data-handle="nw"], .canvas .handle[data-handle="se"] { cursor: nwse-resize; }
+    .canvas .handle[data-handle="ne"], .canvas .handle[data-handle="sw"] { cursor: nesw-resize; }
     .notes { position: absolute; inset: 0; pointer-events: none; }
     .frame { position: fixed; inset: 0; border: 3px solid #7048e8; pointer-events: none; }
 
@@ -188,7 +192,7 @@
     drag: null,
     outlines: false, // keep linked elements outlined and outline the one under the cursor
     hover: null, // { x, y } of the cursor while outlines are on
-    bendDrag: null, // dragging a selected arrow's midpoint handle
+    handleDrag: null, // dragging a handle of the selected mark: arrow tail/head/bend, box corner
     erasing: false,
     textInput: null,
     skipClick: false,
@@ -430,8 +434,13 @@
     }
     const x = e.clientX;
     const y = e.clientY;
-    if (e.target.closest?.('[data-handle="bend"]') && selectedShape()?.type === 'arrow') {
-      state.bendDrag = { shape: selectedShape(), moved: false };
+    const handle = e.target.closest?.('[data-handle]');
+    if (handle && selectedShape()) {
+      const shape = selectedShape();
+      const kind = handle.dataset.handle;
+      // A box corner resizes against the opposite corner, which stays put.
+      const fixed = shape.type === 'rect' && [kind.includes('w') ? shape.x + shape.w : shape.x, kind.includes('n') ? shape.y + shape.h : shape.y];
+      state.handleDrag = { shape, kind, fixed, x, y, moved: false };
       stage.setPointerCapture(e.pointerId);
       return;
     }
@@ -466,15 +475,14 @@
   function onPointerMove(e) {
     const x = e.clientX;
     const y = e.clientY;
-    if (state.bendDrag) {
-      const { shape } = state.bendDrag;
-      if (!state.bendDrag.moved) {
+    if (state.handleDrag) {
+      const hd = state.handleDrag;
+      if (!hd.moved) {
+        if (Math.hypot(x - hd.x, y - hd.y) < 2) return;
         pushHistory();
-        state.bendDrag.moved = true;
+        hd.moved = true;
       }
-      setBend(shape, bendThrough(shape, x, y));
-      renderShape(shape);
-      reattachNotes(shape);
+      dragHandle(hd, x, y);
       renderSelection();
       return;
     }
@@ -510,18 +518,20 @@
 
   function onPointerUp() {
     state.erasing = false;
-    if (state.bendDrag) {
-      if (state.bendDrag.moved) {
+    if (state.handleDrag) {
+      if (state.handleDrag.moved) {
         state.dirty = true;
         state.skipClick = true;
+        showHint(state.handleDrag.shape); // which element it points at now
       }
-      state.bendDrag = null;
+      state.handleDrag = null;
       return;
     }
     if (state.drag) {
       if (state.drag.moved) {
         state.dirty = true;
         state.skipClick = true;
+        if (state.drag.shape.type !== 'text') showHint(state.drag.shape);
       } else if (state.drag.shape.type === 'text') {
         state.pressedNote = state.drag.shape.id;
       }
@@ -578,6 +588,33 @@
     }
     else if (s.type === 'rect') Object.assign(s, { x: s.x + dx, y: s.y + dy });
     else if (s.type === 'text') Object.assign(s, { ax: s.ax + dx, ay: s.ay + dy });
+  }
+
+  // One step of dragging a handle: an arrow's tail, head or bend, or a box corner.
+  function dragHandle({ shape: s, kind, fixed }, x, y) {
+    if (kind === 'bend') {
+      setBend(s, bendThrough(s, x, y));
+    } else if (kind === 'tail' || kind === 'head') {
+      const rel = relativeBend(s); // the bend keeps its proportion as the arrow changes
+      const [ex, ey] = kind === 'tail' ? ['x1', 'y1'] : ['x2', 'y2'];
+      const [dx, dy] = [x - s[ex], y - s[ey]];
+      Object.assign(s, { [ex]: x, [ey]: y });
+      if (rel) Object.assign(s, applyRelativeBend(s, rel));
+      if (kind === 'tail') {
+        // The comment pinned at the tail comes along (and re-aims the tail at itself).
+        for (const note of state.shapes) {
+          if (note.type === 'text' && note.mark === s.id) {
+            translate(note, dx, dy);
+            renderShape(note);
+          }
+        }
+      }
+    } else if (fixed) {
+      const [fx, fy] = fixed;
+      Object.assign(s, { x: Math.min(fx, x), y: Math.min(fy, y), w: Math.max(6, Math.abs(x - fx)), h: Math.max(6, Math.abs(y - fy)) });
+    }
+    renderShape(s);
+    if (s.type === 'arrow') reattachNotes(s);
   }
 
   // Moves a shape and re-renders it; comments attached to a mark travel with it. (A moved
@@ -980,7 +1017,8 @@
     g.replaceChildren();
     const stroke = { fill: 'none', stroke: s.color, 'stroke-width': STROKE_PX, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' };
     // Invisible wide stroke so thin lines are easy to grab and erase.
-    const hit = { fill: 'none', stroke: 'transparent', 'stroke-width': 16, 'pointer-events': 'stroke' };
+    // Invisible wide stroke: grab or erase a mark up to 6px off its line.
+    const hit = { fill: 'none', stroke: 'transparent', 'stroke-width': 12 + STROKE_PX, 'pointer-events': 'stroke' };
     if (s.type === 'pen') {
       const d = penPath(s.points);
       g.append(svgEl('path', { d, ...hit }), svgEl('path', { d, ...stroke }));
@@ -989,7 +1027,7 @@
       g.append(svgEl('path', { d, ...hit }), svgEl('path', { d, ...stroke }));
     } else if (s.type === 'rect') {
       const r = { x: s.x, y: s.y, width: s.w, height: s.h, rx: 6 };
-      g.append(svgEl('rect', { ...r, ...hit }), svgEl('rect', { ...r, ...stroke }));
+      g.append(svgEl('rect', { ...r, ...hit, class: 'hit-area' }), svgEl('rect', { ...r, ...stroke }));
     }
   }
 
@@ -1010,14 +1048,15 @@
         stroke: '#7048e8', 'stroke-width': 1.5, 'stroke-dasharray': '5 4', 'pointer-events': 'none',
       }),
     );
-    // Drag the midpoint to change the bend; drag it onto the straight line to straighten.
+    // Arrows: drag either end, or the midpoint to change the bend (onto the straight line to
+    // straighten). Boxes: drag a corner to resize.
+    const dot = (name, cx, cy) => svgEl('circle', { cx, cy, r: 5, class: 'handle', 'data-handle': name });
+    const square = (name, cx, cy) => svgEl('rect', { x: cx - 4.5, y: cy - 4.5, width: 9, height: 9, rx: 2, class: 'handle', 'data-handle': name });
     if (s.type === 'arrow') {
-      const [hx, hy] = arrowMidpoint(s);
-      selectionLayer.appendChild(
-        svgEl('circle', {
-          cx: hx, cy: hy, r: 5, fill: '#fff', stroke: '#7048e8', 'stroke-width': 1.5,
-          class: 'bend-handle', 'data-handle': 'bend',
-        }),
+      selectionLayer.append(dot('tail', s.x1, s.y1), dot('head', s.x2, s.y2), dot('bend', ...arrowMidpoint(s)));
+    } else if (s.type === 'rect') {
+      selectionLayer.append(
+        square('nw', s.x, s.y), square('ne', s.x + s.w, s.y), square('se', s.x + s.w, s.y + s.h), square('sw', s.x, s.y + s.h),
       );
     }
   }
