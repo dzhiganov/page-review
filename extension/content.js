@@ -9,7 +9,8 @@
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
   const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard, arrowPathData, relativeBend, applyRelativeBend } =
     globalThis.PageReviewArrows;
-  const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#1e1e1e'];
+  const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#868e96', '#1e1e1e'];
+  const COLOR_NAMES = ['Red', 'Orange', 'Blue', 'Green', 'Grey', 'Black'];
   // How far a comment card may be from a mark to count as that mark's comment.
   const ARROW_ATTACH_PX = 160;
   const BOX_ATTACH_PX = 80;
@@ -298,7 +299,7 @@
     parts.push('<span class="sep"></span>');
     COLORS.forEach((c, i) => {
       parts.push(
-        `<button class="color" data-color="${c}" title="Color (${i + 1})"><span class="swatch" style="background:${c}"></span></button>`,
+        `<button class="color" data-color="${c}" title="Color (${i + 1})" aria-label="${COLOR_NAMES[i]} (${i + 1})"><span class="swatch" style="background:${c}"></span></button>`,
       );
     });
     parts.push('<span class="sep"></span>');
@@ -790,9 +791,11 @@
     parts.push('<button data-size="-1" title="Smaller">−</button><span class="size"></span><button data-size="1" title="Larger">+</button>');
     parts.push('<button data-note="bold" title="Bold"><b>B</b></button>');
     parts.push('<span class="sep"></span>');
-    for (const c of COLORS) {
-      parts.push(`<button class="color" data-note-color="${c}" title="Text color"><span class="swatch" style="background:${c}"></span></button>`);
-    }
+    COLORS.forEach((c, i) => {
+      parts.push(
+        `<button class="color" data-note-color="${c}" title="Text color" aria-label="Text color: ${COLOR_NAMES[i]}"><span class="swatch" style="background:${c}"></span></button>`,
+      );
+    });
     parts.push('<span class="sep"></span>');
     parts.push(`<button data-note="delete" title="Delete (Del)">${icon('clear')}</button>`);
     noteTools.innerHTML = parts.join('');
@@ -1673,7 +1676,7 @@
       state.dirty = true;
     } else if (sel && plain && e.key === 'Enter' && sel.type === 'text') openNoteEditor(sel);
     else if (tool) setTool(tool.id);
-    else if (plain && /^Digit[1-5]$/.test(e.code)) setColor(COLORS[Number(e.code.slice(5)) - 1]);
+    else if (plain && /^Digit[1-6]$/.test(e.code)) setColor(COLORS[Number(e.code.slice(5)) - 1]);
     else handled = SCROLL_KEYS.has(e.key);
     if (handled) {
       e.preventDefault();

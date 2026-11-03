@@ -31,7 +31,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | --- | --- |
 | Start / stop reviewing | Click the icon or **Alt+Shift+R** |
 | Tools | **V** select/move · **P** pen · **A** arrow · **R** box · **T** comment · **E** eraser |
-| Colors | **1–5** (also recolors the selected drawing) |
+| Colors | **1–6** (also recolors the selected drawing) |
 | Comment on a mark | Finish an arrow or box and type; **Enter** adds it, **Esc** skips it |
 | Move | Select tool → drag any mark (a box from anywhere inside it); a selected arrow has handles at both ends, a box at its corners. Comments can be dragged with any tool; a comment on an arrow takes the arrow's tail with it. Arrow keys nudge (Shift = 10px) |
 | Delete | Select → **Delete**/Backspace, or the eraser |

@@ -33,6 +33,12 @@ test('size steps stay within range', () => {
   assert.equal(stepSize(32, 1), 32);
 });
 
+test('every palette colour is a valid comment colour (grey included)', () => {
+  for (const color of ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#868e96', '#1e1e1e']) {
+    assert.equal(normalizeFont({ color }).color, color);
+  }
+});
+
 test('noteCss maps the font to CSS', () => {
   const css = noteCss({ family: 'mono', size: 20, weight: 700, color: '#2f9e44' });
   assert.match(css.fontFamily, /monospace/);

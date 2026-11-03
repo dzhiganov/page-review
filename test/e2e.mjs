@@ -555,6 +555,27 @@ try {
   await inject(); // close (nothing drawn)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
+  // Grey: sixth key in the palette, after green, for marks and for comment text; saved as is.
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  assert.deepEqual(
+    await overlay('.toolbar .color').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label'))),
+    ['Red (1)', 'Orange (2)', 'Blue (3)', 'Green (4)', 'Grey (5)', 'Black (6)'],
+  );
+  await page.keyboard.press('5');
+  await page.keyboard.press('a');
+  await drag([400, 650], [600, 560]);
+  await page.keyboard.type('Grey text');
+  await overlay('.note-tools [aria-label="Text color: Grey"]').click();
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('Control+s');
+  await overlay('.toast').filter({ hasText: 'Saved' }).waitFor();
+  const greyReview = (await storedReviews())[0];
+  assert.equal(greyReview.shapes.find((sh) => sh.type === 'arrow').color, '#868e96');
+  assert.equal(greyReview.shapes.find((sh) => sh.type === 'text').font.color, '#868e96');
+  await inject(); // close (saved)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
   // Moving marks with the Select tool: an arrow by its curve (its comment comes along), a box
   // from inside, a freehand stroke by its line, arrow ends and box corners by their handles.
   // Each drag is one undo step; drawing tools still draw over marks.
