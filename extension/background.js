@@ -80,6 +80,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     );
     return true; // async response
   }
+  if (msg.type === 'capture') {
+    // "Copy image" in the overlay: the same capture as a save, but nothing is stored.
+    chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' }).then(
+      (dataUrl) => sendResponse({ ok: true, dataUrl }),
+      (err) => sendResponse({ ok: false, error: err.message }),
+    );
+    return true; // async response
+  }
   if (msg.type === 'open-reviews') {
     openReviews();
   }

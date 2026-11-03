@@ -409,6 +409,27 @@ try {
   assert.deepEqual(await ends(), [t0x, t0y, h0x, h0y], 'one undo puts the arrow back');
   assert.ok(Math.abs((await follow.boundingBox()).x - fb.x) < 1, 'and the comment');
 
+  // Copy image: what Save would capture goes to the clipboard as a PNG; no review is stored,
+  // the editor stays open and the outlines/handles are not in it.
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(pageUrl).origin });
+  const reviewsBefore = (await storedReviews()).length;
+  const copyBtn = overlay('[data-action="copy"]');
+  assert.equal(await copyBtn.getAttribute('aria-label'), 'Copy image');
+  await copyBtn.click();
+  await overlay('.toast').filter({ hasText: 'Screenshot copied.' }).waitFor();
+  const copied = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    const blob = await item.getType('image/png');
+    const bmp = await createImageBitmap(blob);
+    return { types: item.types, size: blob.size, w: bmp.width, h: bmp.height };
+  });
+  assert.deepEqual(copied.types, ['image/png']);
+  assert.deepEqual([copied.w, copied.h], [1280, 800], 'the visible tab, full size');
+  assert.ok(copied.size > 5000, 'a real screenshot');
+  assert.equal((await storedReviews()).length, reviewsBefore, 'no review saved');
+  assert.equal(await overlay('.toolbar').isVisible(), true, 'still editing');
+  assert.equal(await page.locator('page-review-overlay.capturing').count(), 0);
+
   // Show elements: off by default; on, linked elements stay outlined and the one under the
   // cursor gets an outline too, with any tool. Remembered across sessions.
   const outlines = overlay('.outlines .outline');

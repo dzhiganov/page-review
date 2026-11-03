@@ -40,6 +40,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Show elements | The frame button keeps the elements your marks point at outlined, and outlines the one under the cursor |
 | Undo / redo | **Ctrl/Cmd+Z** · **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** (any keyboard layout) |
 | Save | **Ctrl/Cmd+S** |
+| Copy image | The copy button next to Save puts the annotated screenshot on the clipboard without saving a review (https pages) |
 | Exit | **Esc** (the first Esc deselects) |
 
 The page can't scroll while review mode is on, because drawings belong to the

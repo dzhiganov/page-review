@@ -32,6 +32,7 @@
     rect: '<rect x="4" y="5" width="16" height="14" rx="2"/>',
     text: '<path d="M21 11.5a8.4 8.4 0 0 1-12.3 7.4L3 20.5l1.6-5.4A8.4 8.4 0 1 1 21 11.5Z"/>',
     eraser: '<path d="m7 20-4-4 10-10 7 7-7 7Z"/><path d="M7 20h13"/><path d="m8 11 6 6"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>',
     outlines: '<path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><path d="M8 20H5a1 1 0 0 1-1-1v-3"/><rect x="8" y="9" width="8" height="6" rx="1"/>',
     undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
     redo: '<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>',
@@ -299,6 +300,7 @@
     parts.push(`<button data-action="redo" title="Redo (Ctrl/Cmd+Shift+Z)">${icon('redo')}</button>`);
     parts.push(`<button data-action="clear" title="Clear all">${icon('clear')}</button>`);
     parts.push(`<button data-action="reviews" title="Open saved reviews">${icon('folder')}</button>`);
+    parts.push(`<button data-action="copy" title="Copy image" aria-label="Copy image">${icon('copy')}</button>`);
     parts.push('<button data-action="save" class="save" title="Save (Ctrl/Cmd+S)">Save</button>');
     parts.push(`<button data-action="close" title="Exit (Esc)">${icon('close')}</button>`);
     toolbar.innerHTML = parts.join('');
@@ -314,6 +316,7 @@
       else if (action === 'clear') clearAll();
       else if (action === 'reviews') chrome.runtime.sendMessage({ type: 'open-reviews' });
       else if (action === 'save') save();
+      else if (action === 'copy') copyImage();
       else if (action === 'close') close();
       else if (action === 'outlines') setOutlines(!state.outlines, true);
     });
@@ -1432,6 +1435,61 @@
 
   // ---------- save ----------
 
+  // Shows the page the way it is captured: editor UI hidden, comments numbered.
+  // renderAll() (plus removing the "capturing" class) brings the editor back.
+  async function enterCapture() {
+    select(null);
+    const comments = buildComments();
+    drawBadges(comments);
+    hintsEl.replaceChildren();
+    host.classList.add('capturing');
+    await nextFrames(2);
+    return comments;
+  }
+
+  // Copies exactly what Save would capture to the clipboard, without saving a review.
+  function copyImage() {
+    commitText();
+    if (state.saving) return;
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      toast("Can't copy images on this page: the browser only allows it on https pages.");
+      return;
+    }
+    state.saving = true;
+    const png = (async () => {
+      await enterCapture();
+      try {
+        const res = await chrome.runtime.sendMessage({ type: 'capture' });
+        if (!res?.ok) throw new Error(res?.error ?? 'no response');
+        return dataUrlToBlob(res.dataUrl);
+      } finally {
+        host.classList.remove('capturing');
+        renderAll();
+      }
+    })();
+    png.catch(() => {}); // reported through the clipboard write below
+    // Written right away, still inside the click, with the image to follow: browsers only
+    // let a page write to the clipboard as a direct result of the user's action.
+    navigator.clipboard
+      .write([new ClipboardItem({ 'image/png': png })])
+      .then(
+        () => toast('Screenshot copied.'),
+        (err) =>
+          toast(
+            err?.name === 'NotAllowedError'
+              ? "Couldn't copy: the browser blocked the clipboard. Click the page and try again."
+              : `Couldn't copy: ${err?.message ?? err}`,
+          ),
+      )
+      .finally(() => (state.saving = false));
+  }
+
+  function dataUrlToBlob(url) {
+    const [meta, data] = url.split(',');
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0));
+    return new Blob([bytes], { type: meta.slice(5).split(';')[0] });
+  }
+
   async function save() {
     commitText();
     if (state.saving) return;
@@ -1440,12 +1498,7 @@
       return;
     }
     state.saving = true;
-    select(null);
-    const comments = buildComments();
-    drawBadges(comments);
-    hintsEl.replaceChildren();
-    host.classList.add('capturing');
-    await nextFrames(2);
+    const comments = await enterCapture();
     try {
       const review = {
         id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
