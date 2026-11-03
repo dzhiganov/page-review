@@ -1,7 +1,7 @@
 // Settings view: avatar, storage, and the instructions for an AI agent.
 import { agentInstructions } from './lib/agent.js';
 import { serverHealth } from './lib/server.js';
-import { cleanFolder, folderError, getSettings, updateSettings } from './lib/settings.js';
+import { STORAGE_PERMISSIONS, cleanFolder, folderError, getSettings, hasStoragePermission, updateSettings } from './lib/settings.js';
 import { h, loadImage, saveFile, toast } from './ui.js';
 
 const AVATAR_PX = 128;
@@ -31,11 +31,10 @@ export async function initSettings() {
   });
   $('avatarRemove').addEventListener('click', () => save({ avatar: null }));
 
+  // "click", not "change": clicking the option that is already on asks for a permission
+  // that was refused or removed since.
   for (const radio of document.querySelectorAll('input[name="storage"]')) {
-    radio.addEventListener('change', () => {
-      storageError(null);
-      save({ storage: radio.value });
-    });
+    radio.addEventListener('click', () => pickStorage(radio.value));
   }
   $('downloadsFolder').addEventListener('change', () => {
     const folder = cleanFolder($('downloadsFolder').value);
@@ -71,6 +70,21 @@ function storageError(message) {
   return Boolean(message);
 }
 
+// Downloads folder and Local server need an optional Chrome permission. It is requested
+// here, inside the click, because Chrome only shows the prompt for a user action.
+async function pickStorage(mode) {
+  storageError(null);
+  const wanted = STORAGE_PERMISSIONS[mode];
+  const granted = wanted ? await chrome.permissions.request(wanted).catch(() => false) : true;
+  if (!granted) {
+    render(); // back to the option that was on
+    storageError("Chrome didn't allow it, so this option is off. Reviews stay in the browser.");
+    return;
+  }
+  if (mode !== settings.storage) await save({ storage: mode });
+  else load();
+}
+
 async function save(patch) {
   settings = await updateSettings(patch);
   render(); // storage.onChanged re-renders too; this keeps the form in step right away
@@ -80,6 +94,10 @@ async function save(patch) {
 async function load() {
   settings = await getSettings();
   render();
+  // The permission may be missing: removed in chrome://extensions, or never granted to this install.
+  if (!(await hasStoragePermission(settings.storage))) {
+    storageError("Chrome's permission for this option is off, so reviews only stay in the browser. Click the option to allow it.");
+  }
   // Server status is only needed (and only fetched) in server mode.
   health = settings.storage === 'server' ? await serverHealth() : null;
   render();

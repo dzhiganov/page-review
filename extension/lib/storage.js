@@ -19,6 +19,7 @@ export async function exportReview(review, settings) {
     );
   }
   if (settings.storage === 'downloads') {
+    if (!chrome.downloads) return false; // the optional "downloads" permission isn't granted
     return writeToDownloads(review, settings.downloadsFolder).then(
       () => true,
       (err) => {
@@ -126,7 +127,7 @@ export function writePendingDownloads(settings) {
 
 async function backfill(settings) {
   settings ??= await getSettings();
-  if (settings.storage !== 'downloads') return 0;
+  if (settings.storage !== 'downloads' || !chrome.downloads) return 0;
   const all = await chrome.storage.local.get(null);
   const downloaded = all.downloaded ?? {};
   const pending = Object.entries(all)

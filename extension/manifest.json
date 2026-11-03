@@ -1,17 +1,24 @@
 {
   "manifest_version": 3,
   "name": "Page Review",
-  "version": "0.5.0",
-  "description": "Draw review comments on any web page and export them (screenshot + element info) for an AI agent.",
+  "version": "0.6.0",
+  "description": "Draw and comment on any web page, then save the review as an annotated screenshot plus Markdown for an AI agent.",
+  "homepage_url": "https://github.com/dzhiganov/page-review",
+  "minimum_chrome_version": "123",
   "permissions": [
     "activeTab",
     "scripting",
     "storage",
     "unlimitedStorage",
     "contextMenus",
-    "clipboardWrite",
-    "alarms",
+    "alarms"
+  ],
+  "optional_permissions": [
     "downloads"
+  ],
+  "optional_host_permissions": [
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -41,9 +48,5 @@
     }
   },
   "options_page": "reviews.html",
-  "host_permissions": [
-    "http://localhost/*",
-    "http://127.0.0.1/*"
-  ],
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAyk16vncqmDWQlwLEzBM3kRNi8XvTL12CaXdrolnW2m6cJePvVe3qgSRUjvCN+zZ+p7gkGEvUPusyt9bHM2Ndtx0jmg7i8hBqwITmN1+BnXWaf7PUTyumuZrJyeh237DOLcWHBv5jnWJs/ZLPzSMSOzN4zY9Iq4m/SmcpFo5nZXhJNqIEk9+aYCR/1v7BGcA6sBz9op82SOUpxdwAOaxzrRYmvOcGwTb1/srgCbG6sWK+b+Q4ITuqr0uwkNFx/UlSlDng3s2trHSwWTWw49RexJL07jduq8F9ozl3mVfNyAcvicQEWZoMu6ipssowHUGWywdKmLTr2G1x+c6PTwslMQIDAQAB"
 }

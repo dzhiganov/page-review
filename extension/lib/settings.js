@@ -68,3 +68,16 @@ export function folderError(folder) {
 export function sendsToServer(settings, flag = false) {
   return flag || settings.storage === 'server';
 }
+
+// Chrome permissions the file storage modes need. They are optional in the manifest and
+// requested when the mode is picked in Settings.
+export const STORAGE_PERMISSIONS = {
+  downloads: { permissions: ['downloads'] },
+  server: { origins: ['http://localhost/*', 'http://127.0.0.1/*'] },
+};
+
+// Whether Chrome has granted what the storage mode needs (always true for "browser").
+export async function hasStoragePermission(mode) {
+  const wanted = STORAGE_PERMISSIONS[mode];
+  return !wanted || Boolean(await chrome.permissions?.contains(wanted));
+}
