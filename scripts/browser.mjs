@@ -11,11 +11,13 @@ export const root = path.resolve(import.meta.dirname, '..');
 export const VIEWPORT = { width: 1440, height: 900 };
 const PORT = 4311;
 
-export async function launch() {
+// Options: `extensionDir` loads another build (the unpacked store zip) instead of extension/;
+// `viewport` and `deviceScaleFactor` change the window (the store screenshots are 1280×800).
+export async function launch({ extensionDir = path.join(root, 'extension'), viewport = VIEWPORT, deviceScaleFactor = 2 } = {}) {
   // Copy of the extension with host access, so the script can inject without a toolbar click.
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'page-review-media-'));
   const ext = path.join(tmp, 'ext');
-  fs.cpSync(path.join(root, 'extension'), ext, { recursive: true });
+  fs.cpSync(extensionDir, ext, { recursive: true });
   const manifest = JSON.parse(fs.readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
   manifest.host_permissions = ['<all_urls>'];
   fs.writeFileSync(path.join(ext, 'manifest.json'), JSON.stringify(manifest));
@@ -28,8 +30,8 @@ export async function launch() {
   const context = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
     channel: 'chromium',
     headless: true,
-    viewport: VIEWPORT,
-    deviceScaleFactor: 2,
+    viewport,
+    deviceScaleFactor,
     colorScheme: 'light',
     args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
   });
