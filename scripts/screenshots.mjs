@@ -1,62 +1,24 @@
 // Regenerates the README screenshots in docs/screenshots/ by driving the real
 // extension in Chromium against docs/demo/index.html. Run: npm run screenshots
-import { chromium } from 'playwright';
+// (npm run gifs records the GIFs in docs/gifs/.)
 import fs from 'node:fs';
-import http from 'node:http';
-import os from 'node:os';
 import path from 'node:path';
+import { launch, root, VIEWPORT } from './browser.mjs';
 
-const root = path.resolve(import.meta.dirname, '..');
-const outDir = path.join(root, 'docs/screenshots');
+const outDir = process.env.OUT_DIR ?? path.join(root, 'docs/screenshots');
 fs.mkdirSync(outDir, { recursive: true });
-const VIEWPORT = { width: 1440, height: 900 };
 
-// Copy of the extension with host access, so the script can inject without a toolbar click.
-const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'page-review-shots-'));
-const ext = path.join(tmp, 'ext');
-fs.cpSync(path.join(root, 'extension'), ext, { recursive: true });
-const manifest = JSON.parse(fs.readFileSync(path.join(ext, 'manifest.json'), 'utf8'));
-manifest.host_permissions = ['<all_urls>'];
-fs.writeFileSync(path.join(ext, 'manifest.json'), JSON.stringify(manifest));
-
-const demo = fs.readFileSync(path.join(root, 'docs/demo/index.html'));
-const server = http.createServer((_, res) => res.end(demo)).listen(0);
-const pageUrl = `http://localhost:${server.address().port}/`;
-
-const context = await chromium.launchPersistentContext(path.join(tmp, 'profile'), {
-  channel: 'chromium',
-  headless: true,
-  viewport: VIEWPORT,
-  deviceScaleFactor: 2,
-  colorScheme: 'light',
-  args: [`--disable-extensions-except=${ext}`, `--load-extension=${ext}`],
-});
+const { context, sw, extId, page, openOverlay, closeOverlay, close } = await launch();
 
 try {
-  const sw = context.serviceWorkers()[0] ?? (await context.waitForEvent('serviceworker'));
-  const extId = new URL(sw.url()).host;
-  const page = await context.newPage();
-  await page.goto(pageUrl);
-  await page.bringToFront();
-
-  const toggleOverlay = () =>
-    sw.evaluate(async (url) => {
-      const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'lib/frame.js', 'content.js'] });
-    }, pageUrl);
-  const openOverlay = async () => {
-    await toggleOverlay();
-    await page.waitForSelector('page-review-overlay');
-  };
-  const closeOverlay = async () => {
-    await toggleOverlay();
-    await page.waitForSelector('page-review-overlay', { state: 'detached' });
-  };
+  const overlay = (sel) => page.locator(`page-review-overlay ${sel}`);
   const box = (sel) => page.locator(sel).first().boundingBox();
-  const drag = async (from, to) => {
+  const shot = (name, clip, p = page) =>
+    p.screenshot({ path: path.join(outDir, `${name}.png`), ...(clip ? { clip } : {}) });
+  const drag = async (from, to, steps = 16) => {
     await page.mouse.move(...from);
     await page.mouse.down();
-    await page.mouse.move(...to, { steps: 16 });
+    await page.mouse.move(...to, { steps });
     await page.mouse.up();
   };
   const freehand = async (points) => {
@@ -65,99 +27,161 @@ try {
     for (const p of points.slice(1)) await page.mouse.move(...p);
     await page.mouse.up();
   };
-  // A slightly wobbly hand-drawn ellipse around a box.
-  const ellipse = (b, padX, padY) =>
-    Array.from({ length: 64 }, (_, i) => {
-      const a = (i / 60) * Math.PI * 2 - 0.5;
-      const wobble = 1 + Math.sin(i * 0.7) * 0.015;
-      return [
-        b.x + b.width / 2 + Math.cos(a) * (b.width / 2 + padX) * wobble,
-        b.y + b.height / 2 + Math.sin(a) * (b.height / 2 + padY) * wobble,
-      ];
-    });
-  const comment = async (x, y, text) => {
-    // Arrows and boxes open a comment of their own; this script places comments by hand.
-    if (await page.locator('page-review-overlay .note-card textarea').count()) await page.keyboard.press('Escape');
-    await page.keyboard.press('t');
-    await page.mouse.click(x, y);
+  // Arrows and boxes open a comment of their own: type into it.
+  const say = async (text) => {
+    await overlay('.note-card textarea').waitFor();
     await page.keyboard.type(text);
     await page.keyboard.press('Enter');
   };
+  const comment = async (x, y, text) => {
+    await page.keyboard.press('t');
+    await page.mouse.click(x, y);
+    await say(text);
+  };
   const save = async () => {
     await page.keyboard.press('Control+s');
-    await page.locator('page-review-overlay .toast').filter({ hasText: 'Saved' }).waitFor();
+    await overlay('.toast').filter({ hasText: 'Saved' }).waitFor();
   };
-  const settle = () => page.waitForTimeout(4000); // let element hints and the welcome toast fade
+  const hideToast = () =>
+    page.evaluate(() => {
+      const t = document.querySelector('page-review-overlay')?.shadowRoot.querySelector('.toast');
+      if (t) t.hidden = true;
+    });
+  const settle = async () => {
+    await page.waitForTimeout(2500); // let the element hints fade
+    await hideToast();
+  };
+  // Moves a comment card to the right of the "Book a demo" button.
+  const besideGhost = async (text) => {
+    await page.keyboard.press('v');
+    const card = await overlay('.note-card').filter({ hasText: text }).boundingBox();
+    const g = await box('.btn.ghost');
+    await drag([card.x + card.width / 2, card.y + card.height / 2], [g.x + g.width + 30 + card.width / 2, g.y + g.height / 2]);
+  };
+  const scrollTo = (id) => page.evaluate((id) => scrollTo(0, document.getElementById(id).offsetTop - 40), id);
 
-  // --- Review 1: the hero -------------------------------------------------
+  // --- Hero: a page mid-review ---------------------------------------------------
   await openOverlay();
+  await hideToast();
   const h1 = await box('h1');
-  await page.keyboard.press('p');
-  await freehand(ellipse(h1, 28, 18));
   await page.keyboard.press('a');
-  await drag([150, 470], [h1.x + 10, h1.y + h1.height + 6]);
-  await comment(70, 520, 'Headline wraps to two lines. Can we shorten it?');
+  await drag([140, 560], [h1.x + 196, h1.y + h1.height - 26]);
+  await say('Headline wraps to three lines. Can we shorten it?');
 
   const cta = await box('.btn.primary');
   await page.keyboard.press('r');
   await drag([cta.x - 8, cta.y - 8], [cta.x + cta.width + 8, cta.y + cta.height + 8]);
-  const ghost = await box('.btn.ghost');
-  await comment(ghost.x + ghost.width + 40, ghost.y + ghost.height, 'Use the brand indigo here, not green');
+  await say('Use the brand indigo here, not green');
+  await besideGhost('brand indigo'); // off the subtitle: the comment stays about the box
+  await page.keyboard.press('Escape');
 
   await page.keyboard.press('3'); // blue
   const odd = await box('.ic.odd');
   await page.keyboard.press('a');
-  await drag([odd.x + 150, odd.y + 30], [odd.x + odd.width + 6, odd.y + odd.height / 2]);
-  await comment(odd.x + 158, odd.y + 46, 'Different icon style');
+  await drag([odd.x + 190, odd.y + 12], [odd.x + odd.width + 6, odd.y + odd.height / 2]);
+  await say('Different icon style');
+
+  const headings = page.locator('.feature h3');
+  const live = await headings.nth(0).boundingBox();
+  const sharing = await headings.nth(2).boundingBox();
+  await page.keyboard.press('s');
+  await page.mouse.click(live.x + 160, live.y + live.height / 2);
+  await say('Click Live dashboards');
+  await page.mouse.click(sharing.x + 130, sharing.y + sharing.height / 2);
+  await say('Go back, click Team sharing');
   await page.keyboard.press('1');
   await page.keyboard.press('v');
+  await page.mouse.move(5, VIEWPORT.height - 5);
   await settle();
-  await page.screenshot({ path: path.join(outDir, 'annotate.png') });
+  await shot('hero');
+
+  // --- Comment style bar: one comment selected ------------------------------------------
+  const card = overlay('.note-card').filter({ hasText: 'Use the brand indigo' });
+  await card.locator('.text').click();
+  await overlay('.note-tools [data-note="bold"]').click();
+  await page.waitForTimeout(300);
+  const c = await card.boundingBox();
+  const bar = await overlay('.note-tools').boundingBox();
+  const pad = 24;
+  const x0 = Math.min(c.x, bar.x) - pad;
+  const y0 = Math.min(c.y, bar.y) - pad;
+  const x1 = Math.max(c.x + c.width, bar.x + bar.width) + pad;
+  const y1 = Math.max(c.y + c.height, bar.y + bar.height) + pad;
+  await shot('comment-style', { x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
+  await page.keyboard.press('Escape');
+
+  // --- Show elements: outlines and tag badges ------------------------------------
+  await overlay('[data-action="outlines"]').click();
+  const sharingCard = await page.locator('.feature').nth(2).boundingBox();
+  await page.mouse.move(sharingCard.x + sharingCard.width - 40, sharingCard.y + 14);
+  await page.waitForTimeout(300);
+  const row = await box('.features');
+  const bottom = Math.min(row.y + row.height + 16, VIEWPORT.height - 6); // above the overlay's frame line
+  await shot('show-elements', { x: row.x - 24, y: row.y - 22, width: row.width + 48, height: bottom - row.y + 22 });
+  await overlay('[data-action="outlines"]').click();
   await save();
   await closeOverlay();
 
-  // --- Review 2: features -------------------------------------------------
-  await page.evaluate(() => scrollTo(0, document.getElementById('features').offsetTop - 40));
+  // --- More reviews for the reviews page ---------------------------------------------
+  // Features: a grey underline under a typo.
+  await scrollTo('features');
   await openOverlay();
   const typo = await page.locator('.feature p').first().boundingBox();
+  await page.keyboard.press('5'); // grey
   await page.keyboard.press('p');
-  await freehand(
-    Array.from({ length: 30 }, (_, i) => [typo.x + 76 + i * 3.1, typo.y + typo.height + 2 + Math.sin(i / 2) * 1.2]),
-  );
+  await freehand(Array.from({ length: 30 }, (_, i) => [typo.x + 76 + i * 3.1, typo.y + typo.height + 2 + Math.sin(i / 2) * 1.2]));
   await comment(typo.x + 60, typo.y + typo.height + 64, 'Typo: "analitics"');
-  const sharing = await page.locator('.feature').nth(2).locator('p').boundingBox();
-  await page.keyboard.press('r');
-  await drag([sharing.x - 8, sharing.y - 6], [sharing.x + sharing.width + 8, sharing.y + sharing.height + 6]);
-  await comment(sharing.x + 40, sharing.y + sharing.height + 70, 'Mention the Slack integration here');
+  await page.keyboard.press('1');
   await save();
   await closeOverlay();
 
-  // --- Review 3: pricing --------------------------------------------------
-  await page.evaluate(() => scrollTo(0, document.getElementById('pricing').offsetTop - 40));
+  // Pricing: a box around the plan to highlight.
+  await scrollTo('pricing');
   await openOverlay();
-  const plans = page.locator('.plan');
-  const pro = await plans.nth(1).boundingBox();
+  const pro = await page.locator('.plan').nth(1).boundingBox();
   await page.keyboard.press('r');
   await drag([pro.x - 10, pro.y - 10], [pro.x + pro.width + 10, pro.y + pro.height + 10]);
-  await comment(pro.x + 40, pro.y - 24, 'Highlight Pro, it is the plan we want people to pick');
-  const price = await plans.nth(2).locator('.price').boundingBox();
-  await page.keyboard.press('a');
-  await drag([price.x + 260, price.y + 110], [price.x + 150, price.y + price.height / 2]);
-  await comment(price.x + 220, price.y + 160, 'Show the yearly price too');
+  await say('Highlight Pro, it is the plan we want people to pick');
   await save();
   await closeOverlay();
 
-  // --- Review 4: testimonials -----------------------------------------------
-  await page.evaluate(() => scrollTo(0, document.getElementById('customers').offsetTop - 40));
-  await openOverlay();
-  const quote = await page.locator('.quote').first().boundingBox();
-  await page.keyboard.press('p');
-  await freehand(ellipse(quote, 22, 18));
-  await comment(quote.x + quote.width - 40, quote.y + quote.height + 70, 'Add customer photos and company logos');
-  await save();
-  await closeOverlay();
+  // Before and after a fix, framed to the hero, to combine on the reviews page.
+  const FRAME = [[180, 140], [1260, 560]];
+  const framedReview = async (marks) => {
+    await page.evaluate(() => scrollTo(0, 0));
+    await openOverlay();
+    await page.keyboard.press('f');
+    await drag(...FRAME);
+    await marks();
+    await save();
+    await closeOverlay();
+  };
+  await framedReview(async () => {
+    const h = await box('h1');
+    await page.keyboard.press('a');
+    await drag([200, 400], [h.x + 196, h.y + h.height - 26]);
+    await say('Three lines is too long');
+    const b = await box('.btn.primary');
+    await page.keyboard.press('r');
+    await drag([b.x - 8, b.y - 8], [b.x + b.width + 8, b.y + b.height + 8]);
+    await say('Use the brand indigo here');
+    await besideGhost('brand indigo');
+  });
+  const fix = await page.addStyleTag({ content: '.btn.primary { background: #4f46e5 !important; }' });
+  await page.evaluate(() => (document.querySelector('h1').textContent = 'Analytics your whole team understands'));
+  await framedReview(async () => {
+    await page.keyboard.press('4'); // green
+    const b = await box('.btn.primary');
+    await page.keyboard.press('r');
+    await drag([b.x - 8, b.y - 8], [b.x + b.width + 8, b.y + b.height + 8]);
+    await say('Looks right now');
+    await besideGhost('Looks right');
+    await page.keyboard.press('1');
+  });
+  await fix.evaluate((el) => el.remove());
+  await page.reload();
 
-  // The first review moves to yesterday, to show the day groups.
+  // The oldest review moves to yesterday, to show the day groups.
   await sw.evaluate(async () => {
     const all = await chrome.storage.local.get(null);
     const [oldest] = Object.entries(all)
@@ -169,28 +193,44 @@ try {
     await chrome.storage.local.set({ [key]: { ...review, createdAt: yesterday.toISOString() } });
   });
 
-  // --- Reviews page ---------------------------------------------------------
+  // --- Reviews page: combine the before and after -----------------------------------------
   const reviews = await context.newPage();
   await reviews.goto(`chrome-extension://${extId}/reviews.html`);
-  await reviews.locator('article.review').nth(3).waitFor();
+  const cards = reviews.locator('article.review');
+  await cards.nth(4).waitFor();
+  await cards.nth(0).locator('.shot').dragTo(cards.nth(1).locator('.shot'));
+  await reviews.locator('dialog.compose[open]').waitFor();
+  await reviews.waitForTimeout(500);
+  const dialog = await reviews.locator('dialog.compose').boundingBox();
+  await shot('combine', dialog, reviews);
+  await reviews.click('#composeCreate');
+  await reviews.locator('#toast').filter({ hasText: 'Combined image created' }).waitFor();
+  const composite = await sw.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    return Object.values(all).find((r) => r?.composite)?.screenshot;
+  });
+  fs.writeFileSync(path.join(outDir, 'combined.png'), Buffer.from(composite.split(',')[1], 'base64'));
+  await reviews.locator('#toast').waitFor({ state: 'hidden' });
+  await reviews.evaluate(() => scrollTo(0, 0));
   await reviews.waitForTimeout(300);
-  await reviews.screenshot({ path: path.join(outDir, 'reviews.png'), fullPage: true });
+  await shot('reviews', null, reviews);
 
-  // The Markdown an agent gets, for the README excerpt.
-  const all = await sw.evaluate(() => chrome.storage.local.get(null));
-  const latestFirst = Object.entries(all)
-    .filter(([k]) => k.startsWith('review:'))
-    .map(([, v]) => v)
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  const { toMarkdown } = await import('../extension/lib/format.js');
-  const hero = latestFirst.find((r) => r.comments.some((c) => c.text.startsWith('Headline')));
-  fs.writeFileSync(path.join(tmp, 'hero.md'), toMarkdown(hero));
-  for (const r of latestFirst) {
-    console.log(r.comments.map((c) => `  #${c.n} ${c.kind} [${c.marks}] "${c.text}" -> ${c.target?.selector}`).join('\n'));
-  }
-  fs.writeFileSync(path.join(tmp, 'hero.png'), Buffer.from(hero.screenshot.split(',')[1], 'base64'));
-  console.log(`Screenshots written to ${path.relative(root, outDir)}/ (sample Markdown: ${path.join(tmp, 'hero.md')})`);
+  // --- Settings -------------------------------------------------------------------
+  await reviews.goto(`chrome-extension://${extId}/reviews.html#settings`);
+  await reviews.locator('#settings input[value="downloads"]').check();
+  await reviews.waitForTimeout(500);
+  // Document coordinates: checking the radio scrolled the page.
+  const panels = await reviews.evaluate(() => {
+    const all = [...document.querySelectorAll('#settings .panel')].map((el) => el.getBoundingClientRect());
+    const [first, last] = [all[0], all.at(-1)];
+    return { x: first.left + scrollX, y: first.top + scrollY, width: first.width, height: last.bottom - first.top };
+  });
+  await reviews.screenshot({
+    path: path.join(outDir, 'settings.png'),
+    fullPage: true,
+    clip: { x: panels.x - 24, y: panels.y - 24, width: panels.width + 48, height: panels.height + 48 },
+  });
+  console.log(`Screenshots written to ${outDir}`);
 } finally {
-  await context.close();
-  server.close();
+  await close();
 }
