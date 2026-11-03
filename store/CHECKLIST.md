@@ -8,9 +8,8 @@ Texts are in [listing.md](listing.md), images in `images/`.
 - [ ] `npm test` passes.
 - [ ] `npm run build:store` writes `dist/page-review-<version>.zip` and its check passes.
 - [ ] PRIVACY.md is on `main` on GitHub, so the policy URL works.
-- [ ] If the Local server option should work with the store build: add the store item's ID to
-      `EXTENSION_IDS` in `server/http.js` (it only accepts the dev ID now), or start the server with
-      `PAGE_REVIEW_EXTENSION_IDS=<store id>,lehkiologlmiimeklbeblhinfkldafmj`.
+- [x] The store item's ID (`mhfdkehlimajkmonhhphpdhimoldlcad`) is in `EXTENSION_IDS` in `server/http.js`,
+      so the Local server option accepts both the store build and the unpacked dev build.
 
 ## Package
 

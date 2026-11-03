@@ -3,9 +3,12 @@ import http from 'node:http';
 import { DATA_DIR, StoreError, deleteReview, listReviews, saveReview, summary } from './store.js';
 
 export const DEFAULT_PORT = Number(process.env.PAGE_REVIEW_PORT ?? 47615);
-// The extension's ID is pinned by the "key" in extension/manifest.json, so it's the
-// same wherever it's loaded from. Other extensions installed in the browser are refused.
-const EXTENSION_IDS = (process.env.PAGE_REVIEW_EXTENSION_IDS ?? 'lehkiologlmiimeklbeblhinfkldafmj').split(',');
+// The dev ID is pinned by the "key" in extension/manifest.json, so it's the same wherever
+// the unpacked extension is loaded from; the second is the Chrome Web Store build.
+// Other extensions installed in the browser are refused.
+const EXTENSION_IDS = (
+  process.env.PAGE_REVIEW_EXTENSION_IDS ?? 'lehkiologlmiimeklbeblhinfkldafmj,mhfdkehlimajkmonhhphpdhimoldlcad'
+).split(',');
 const ALLOWED_ORIGINS = new Set(EXTENSION_IDS.map((id) => `chrome-extension://${id.trim()}`));
 const MAX_BODY = 64 * 1024 * 1024;
 
