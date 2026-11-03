@@ -85,10 +85,15 @@ async function load() {
   render();
 }
 
+const PERSON_ICON =
+  '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="4"/><path d="M4.5 20.5a7.5 7.5 0 0 1 15 0"/></svg>';
+
 function render() {
   const preview = $('avatarPreview');
-  preview.replaceChildren(settings.avatar ? h('img', { src: settings.avatar, alt: 'Your avatar' }) : '');
-  preview.classList.toggle('empty', !settings.avatar);
+  if (settings.avatar) preview.replaceChildren(h('img', { src: settings.avatar, alt: 'Your avatar' }));
+  else preview.innerHTML = PERSON_ICON;
+  // Not "empty": that class belongs to the empty reviews list and adds padding.
+  preview.classList.toggle('no-image', !settings.avatar);
   $('avatarRemove').hidden = !settings.avatar;
 
   for (const radio of document.querySelectorAll('input[name="storage"]')) radio.checked = radio.value === settings.storage;
