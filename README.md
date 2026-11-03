@@ -104,14 +104,15 @@ Each comment in the Markdown looks like this (from the review above):
 
 - **Comment on its own**: the element under the comment's pin (the card's sharp corner).
 - **Arrow**: the element under the arrow tip, or something just past it if the
-  arrow stops a little short. A comment near the arrow's tail becomes its text.
+  arrow stops a little short.
 - **Box or freehand circle**: the element that best matches the drawn area.
 - **Underline**: the text just above it.
-- A comment belongs to the mark you drew right before it, or else to the nearest mark.
+- **Comment on an arrow or box** (the one that opens when you finish drawing it): it is
+  about that mark's element, wherever you move the card.
 - **Marks that touch** (a circle plus an underline, an arrow pointing into a circle)
   count as one comment.
 
-After each mark, a dashed outline briefly shows which element it picked.
+After each mark or standalone comment, a dashed outline briefly shows which element it picked.
 
 ## Develop
 

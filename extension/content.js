@@ -11,11 +11,6 @@
     globalThis.PageReviewArrows;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#868e96', '#1e1e1e'];
   const COLOR_NAMES = ['Red', 'Orange', 'Blue', 'Green', 'Grey', 'Black'];
-  // How far a comment card may be from a mark to count as that mark's comment.
-  const ARROW_ATTACH_PX = 160;
-  const BOX_ATTACH_PX = 80;
-  // A comment written right after a mark is almost always about that mark.
-  const PREVIOUS_ATTACH_PX = 240;
   const NOTE_MAX_W = 280;
   const STROKE_PX = 3; // drawings' stroke width
   const NOTE_TOOLS_GAP = 12; // between a comment card and its style bar
@@ -497,6 +492,7 @@
       }
       move(drag.shape, x - drag.x, y - drag.y);
       Object.assign(drag, { x, y });
+      if (drag.shape.type === 'text') updatePinHint(drag.shape);
       renderSelection();
       return;
     }
@@ -534,6 +530,7 @@
         state.dirty = true;
         state.skipClick = true;
         if (state.drag.shape.type !== 'text') showHint(state.drag.shape);
+        else endPinHint();
       } else if (state.drag.shape.type === 'text') {
         state.pressedNote = state.drag.shape.id;
       }
@@ -758,6 +755,7 @@
       shape.text = text;
       state.shapes.push(shape);
       renderShape(shape);
+      showHint(shape); // a standalone comment: the element under its pin
     }
     state.dirty = true;
     updateNoteTools();
@@ -1187,44 +1185,19 @@
     const groupOf = (m) => groups.find((g) => g.marks.includes(m));
     const loose = [];
 
+    // A comment belongs to a mark only when it was started from it (`mark`); then it is about
+    // that mark's element wherever the card is moved. Any other comment is about the element
+    // under its pin.
     for (const t of texts) {
-      const tb = boxOf(t);
-      // People draw a mark and then write its note, so the mark drawn right
-      // before this note wins over a slightly closer one, if it's in range.
-      const order = state.shapes.indexOf(t);
-      const previous = state.shapes.slice(0, order).reverse().find((s) => s.type !== 'text');
-      // A comment started from an arrow or box belongs to it wherever it's moved.
-      const attached = t.mark && marks.find((m) => m.id === t.mark);
-      let best = null;
-      for (const m of attached ? [attached] : marks) {
-        let d;
-        let reversed = false;
-        let limit;
-        if (m.type === 'arrow') {
-          const tail = pointBoxDist(m.x1, m.y1, tb);
-          const tip = pointBoxDist(m.x2, m.y2, tb);
-          // A note next to the tip means the arrow was drawn from the target to the note.
-          reversed = tip < tail;
-          d = Math.min(tail, tip);
-          limit = ARROW_ATTACH_PX;
-        } else {
-          d = boxDist(boxOf(m), tb);
-          limit = BOX_ATTACH_PX;
-        }
-        if (m !== attached && d > (m === previous ? PREVIOUS_ATTACH_PX : limit)) continue;
-        if (m === previous || m === attached) {
-          best = { m, d: -1, reversed };
-          break;
-        }
-        if (!best || d < best.d) best = { m, d, reversed };
-      }
-      if (best) {
-        const group = groupOf(best.m);
-        group.texts.push(t);
-        if (best.reversed) group.reversed.add(best.m.id);
-      } else {
+      const m = t.mark && marks.find((mk) => mk.id === t.mark);
+      if (!m) {
         loose.push({ marks: [], texts: [t], reversed: new Set() });
+        continue;
       }
+      const group = groupOf(m);
+      group.texts.push(t);
+      // A card next to the tip means the arrow was drawn from the target to the comment.
+      if (m.type === 'arrow' && pointBoxDist(m.x2, m.y2, boxOf(t)) < pointBoxDist(m.x1, m.y1, boxOf(t))) group.reversed.add(m.id);
     }
 
     // Marks that touch (a circle plus an underline, an arrow pointing into a circle)
@@ -1392,9 +1365,24 @@
     return parts.join(' > ');
   }
 
-  function showHint(mark) {
-    const el = targetOf(mark, false);
-    if (!el) return;
+  // The element a shape is about: under an arrow's head, inside a box or freehand mark, under a
+  // standalone comment's pin. A comment attached to a mark has none of its own: it is about
+  // its mark's element, never what happens to sit under the card.
+  function linkedElement(s) {
+    if (s.type !== 'text') return targetOf(s, false);
+    return s.mark ? null : (elementsAt(s.ax, s.ay)[0] ?? null);
+  }
+
+  // Briefly outlines the element a shape links to (after drawing, moving or placing it).
+  function showHint(shape) {
+    const hint = hintFor(linkedElement(shape));
+    if (!hint) return;
+    hintsEl.appendChild(hint);
+    fadeHint(hint);
+  }
+
+  function hintFor(el) {
+    if (!el) return null;
     const r = el.getBoundingClientRect();
     const hint = document.createElement('div');
     hint.className = 'hint';
@@ -1402,9 +1390,25 @@
     const label = document.createElement('span');
     label.textContent = shortName(el);
     hint.appendChild(label);
-    hintsEl.appendChild(hint);
-    setTimeout(() => (hint.style.opacity = '0'), 1200);
-    setTimeout(() => hint.remove(), 1700);
+    return hint;
+  }
+
+  function fadeHint(hint, after = 1200) {
+    setTimeout(() => (hint.style.opacity = '0'), after);
+    setTimeout(() => hint.remove(), after + 500);
+  }
+
+  // While a standalone comment is dragged, the element under its pin stays outlined.
+  let pinHint = null;
+  function updatePinHint(note) {
+    pinHint?.remove();
+    pinHint = note && !note.mark ? hintFor(linkedElement(note)) : null;
+    if (pinHint) hintsEl.appendChild(pinHint);
+  }
+
+  function endPinHint() {
+    if (pinHint) fadeHint(pinHint, 600);
+    pinHint = null;
   }
 
   // ---------- element outlines ("Show elements") ----------
@@ -1433,7 +1437,9 @@
 
   function onHover(e) {
     if (!state.outlines) return;
-    const over = e.type === 'pointermove' && !e.target.closest?.('.note-card');
+    // Nothing under a comment card lights up, not even while the card is dragged.
+    const draggingNote = state.drag?.shape.type === 'text';
+    const over = e.type === 'pointermove' && !draggingNote && !e.target.closest?.('.note-card');
     state.hover = over ? { x: e.clientX, y: e.clientY } : null;
     scheduleOutlines();
   }
@@ -1455,11 +1461,10 @@
     const found = new Map(); // element -> colour (the first mark wins)
     if (state.outlines) {
       for (const s of state.shapes) {
-        const el =
-          s.type !== 'text' ? targetOf(s, false) : s.mark ? null : elementsAt(s.ax, s.ay)[0];
+        const el = linkedElement(s);
         if (el && !found.has(el)) found.set(el, s.type === 'text' ? HOVER_COLOR : s.color);
       }
-      const hovered = state.hover && elementsAt(state.hover.x, state.hover.y)[0];
+      const hovered = state.hover && state.drag?.shape.type !== 'text' && elementsAt(state.hover.x, state.hover.y)[0];
       if (hovered && !found.has(hovered)) found.set(hovered, HOVER_COLOR);
     }
     outlinesEl.replaceChildren(

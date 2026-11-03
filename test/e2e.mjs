@@ -324,13 +324,16 @@ try {
   await page.keyboard.type('Far from its box');
   await page.keyboard.press('Enter');
   await page.keyboard.press('Control+s');
-  await page.locator('page-review-overlay .toast').filter({ hasText: saved('2 comments') }).waitFor();
+  await page.locator('page-review-overlay .toast').filter({ hasText: saved('3 comments') }).waitFor();
   const linking = (await storedReviews())[0];
   const short = linking.comments.find((c) => c.text === 'Arrow stops short');
   assert.equal(short?.target.selector, '#buy', `arrow short of button -> ${short?.target.selector}`);
+  // A comment placed by hand is standalone: it is about the element under its pin, and the
+  // box stays a drawing-only comment about the card it encloses.
   const far = linking.comments.find((c) => c.text === 'Far from its box');
-  assert.equal(far?.kind, 'box', 'far comment attached to the box drawn before it');
-  assert.equal(far.target.text, 'API Layer');
+  assert.equal(far?.kind, 'text', 'a hand-placed comment stands on its own');
+  assert.equal(far.target.tag, 'main', 'it links to the element under its pin');
+  assert.equal(linking.comments.find((c) => c.kind === 'box')?.target.text, 'API Layer');
 
   // Editing: clicking a comment with the Comment tool edits it (not a new one), and so does a
   // double-click with the Select tool.
@@ -553,6 +556,64 @@ try {
   await page.locator('page-review-overlay [data-action="outlines"]').click(); // off again
   assert.equal((await sw.evaluate(async () => (await chrome.storage.local.get('editorPrefs')).editorPrefs)).outlines, false);
   await inject(); // close (nothing drawn)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
+  // Element links of comments. An attached comment never links to (or lights up) what is
+  // under its card, even when dragged over something else; a standalone comment links to the
+  // element under its pin, which is outlined when it is placed and while it is dragged.
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const hintLabels = () => overlay('.hints .hint span').allTextContents();
+  const outlineLabels = () => overlay('.outlines .outline span').allTextContents();
+  const apiCard = await page.locator('.card').nth(2).boundingBox();
+  const buyAt = await page.locator('#buy').boundingBox();
+  await overlay('[data-action="outlines"]').click(); // Show elements on
+  await page.keyboard.press('a');
+  await drag([700, 700], [buyAt.x + buyAt.width + 4, buyAt.y + buyAt.height / 2]);
+  await page.keyboard.type('Attached');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('v');
+  await page.waitForTimeout(1800); // the drawing hint fades
+  const attached = overlay('.note-card').filter({ hasText: 'Attached' });
+  const ab = await attached.boundingBox();
+  await page.mouse.move(ab.x + 30, ab.y + ab.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(apiCard.x + 40, apiCard.y + 40, { steps: 10 }); // over the "API Layer" card
+  await page.waitForTimeout(80);
+  assert.deepEqual(await hintLabels(), [], 'no hint for an attached comment');
+  assert.ok(!(await outlineLabels()).some((l) => l.startsWith('div.card')), `nothing under the card lights up: ${await outlineLabels()}`);
+  assert.ok((await outlineLabels()).includes('button#buy'), "its arrow's element stays outlined");
+  await page.mouse.up();
+  await overlay('[data-action="outlines"]').click(); // off again
+  // Standalone: placed on the buy button, then dragged by its card onto the "API Layer" card.
+  await page.keyboard.press('t');
+  await page.mouse.click(buyAt.x + 10, buyAt.y + 10);
+  await page.keyboard.type('Standalone');
+  await page.keyboard.press('Enter');
+  assert.ok((await hintLabels()).includes('button#buy'), 'placed: the element under its pin is outlined');
+  await page.waitForTimeout(1800);
+  const lone = overlay('.note-card').filter({ hasText: 'Standalone' });
+  const lb = await lone.boundingBox();
+  const pinOffset = [buyAt.x + 10 - lb.x, buyAt.y + 10 - lb.y];
+  await page.keyboard.press('v');
+  await page.mouse.move(lb.x + 40, lb.y + lb.height / 2);
+  await page.mouse.down();
+  const target = [apiCard.x + 60, apiCard.y + 60];
+  await page.mouse.move(target[0] - pinOffset[0] + 40, target[1] - pinOffset[1] + lb.height / 2, { steps: 10 });
+  await page.waitForTimeout(80);
+  assert.equal((await hintLabels()).length, 1, 'dragging: one hint');
+  assert.match((await hintLabels())[0], /^div\.card/, 'the element under the pin, while dragging');
+  await page.mouse.up();
+  await page.keyboard.press('Control+s');
+  await overlay('.toast').filter({ hasText: 'Saved' }).waitFor();
+  const linkReview = (await storedReviews())[0];
+  const attachedC = linkReview.comments.find((c) => c.text === 'Attached');
+  assert.equal(attachedC.kind, 'arrow');
+  assert.equal(attachedC.target.selector, '#buy', 'attached comment keeps its arrow target');
+  const loneC = linkReview.comments.find((c) => c.text === 'Standalone');
+  assert.equal(loneC.kind, 'text');
+  assert.equal(loneC.target.text, 'API Layer', 'standalone comment links to the element under its pin');
+  await inject(); // close (saved)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
   // Grey: sixth key in the palette, after green, for marks and for comment text; saved as is.
