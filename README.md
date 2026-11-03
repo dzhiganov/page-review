@@ -9,11 +9,14 @@ arrows, boxes and freehand marks on top of any page and leave comments on them.
 Each review is saved as an annotated screenshot plus a description of every comment
 and the page element it points at, ready to paste into an AI agent or a ticket.
 
-Everything stays in your browser, unless you choose to save reviews as files.
+Everything stays in your browser, unless you choose to save reviews as files. See the
+[privacy policy](PRIVACY.md).
 
 ![A page mid-review: an arrow to the headline, a box around a button, comment cards and two numbered steps](docs/screenshots/hero.png)
 
 ## Install
+
+Page Review is coming to the Chrome Web Store. Until then, load it from source:
 
 1. Clone this repo.
 2. Open `chrome://extensions` and turn on **Developer mode** (top right).
