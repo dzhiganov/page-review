@@ -156,9 +156,11 @@
     .outlines { position: fixed; inset: 0; pointer-events: none; }
     .outline { position: fixed; border: 1.5px dashed var(--c); background: color-mix(in srgb, var(--c) 6%, transparent); pointer-events: none; }
     .outline span {
-      position: absolute; top: -21px; left: -1.5px; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      position: absolute; top: -21px; left: -1.5px; right: auto; bottom: auto; max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
       background: var(--c); color: #fff; font: 11px/1 ui-monospace, monospace; padding: 4px 6px; border-radius: 4px;
     }
+    .outline span.right { left: auto; right: -1.5px; }
+    .outline span.below { top: auto; bottom: -21px; }
     .toast {
       position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
       display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: 10px;
@@ -206,13 +208,13 @@
     shadow = host.attachShadow({ mode: 'open' });
     shadow.innerHTML = `
       <style>${STYLES}</style>
+      <div class="hints"></div>
+      <div class="outlines"></div>
       <div class="stage">
         <svg class="canvas" xmlns="${SVG_NS}"><g class="shapes"></g><g class="selection"></g><g class="badges"></g></svg>
         <div class="notes"></div>
       </div>
       <div class="frame"></div>
-      <div class="hints"></div>
-      <div class="outlines"></div>
       <div class="toolbar" role="toolbar"></div>
       <div class="note-tools" role="toolbar" hidden></div>
       <div class="toast" hidden></div>
@@ -897,6 +899,7 @@
     // The card's box is what gets linked to nearby marks.
     Object.assign(s, { x: Math.round(left), y: Math.round(top), w: Math.round(w), h: Math.round(h) });
     attachTail(s);
+    scheduleOutlines(); // badges keep clear of the card
   }
 
   // An attached arrow's tail points into the middle of its comment card and stops a few px
@@ -1414,6 +1417,21 @@
         return box;
       }),
     );
+    avoidCards();
+  }
+
+  // A tag badge that would cover a comment card moves to another corner of its outline.
+  function avoidCards() {
+    const cards = [...notesLayer.querySelectorAll('.note-card')].map((c) => c.getBoundingClientRect());
+    if (!cards.length) return;
+    const hits = (r) => cards.some((c) => r.left < c.right && r.right > c.left && r.top < c.bottom && r.bottom > c.top);
+    for (const label of outlinesEl.querySelectorAll('.outline span')) {
+      for (const [right, below] of [[false, false], [true, false], [false, true], [true, true]]) {
+        label.classList.toggle('right', right);
+        label.classList.toggle('below', below);
+        if (!hits(label.getBoundingClientRect())) break;
+      }
+    }
   }
 
   const HOVER_COLOR = '#1971c2';

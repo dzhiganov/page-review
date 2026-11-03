@@ -426,6 +426,33 @@ try {
   await page.mouse.move(5, 795); // off the button
   await page.waitForTimeout(100);
   assert.ok(!(await overlay('.outlines .outline span').allTextContents()).includes('button#buy'), 'hover outline follows the cursor');
+  // Outlines sit below comment cards and arrows, and a badge under a card moves to another corner.
+  assert.ok(
+    await page.evaluate(() => {
+      const root = document.querySelector('page-review-overlay').shadowRoot;
+      return !!(root.querySelector('.outlines').compareDocumentPosition(root.querySelector('.stage')) & Node.DOCUMENT_POSITION_FOLLOWING);
+    }),
+    'outlines are painted before (below) the drawings and cards',
+  );
+  await page.keyboard.press('t');
+  await page.mouse.click(buyBtn.x + 4, buyBtn.y - 2); // the card grows up-right, over the button's badge spot
+  await page.keyboard.type('Covers the badge');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('v');
+  await page.mouse.move(buyBtn.x + buyBtn.width - 6, buyBtn.y + buyBtn.height - 6);
+  await page.waitForTimeout(100);
+  const clash = await page.evaluate(() => {
+    const root = document.querySelector('page-review-overlay').shadowRoot;
+    const label = [...root.querySelectorAll('.outline span')].find((s) => s.textContent === 'button#buy');
+    if (!label) return 'no badge';
+    const r = label.getBoundingClientRect();
+    return [...root.querySelectorAll('.note-card')].some((c) => {
+      const b = c.getBoundingClientRect();
+      return r.left < b.right && r.right > b.left && r.top < b.bottom && r.bottom > b.top;
+    });
+  });
+  assert.equal(clash, false, 'badge moved off the comment card');
+  await page.screenshot({ path: path.join(outDir, '5-badge-avoids-card.png') });
   assert.deepEqual(await sw.evaluate(async () => (await chrome.storage.local.get('editorPrefs')).editorPrefs), { smooth: true, outlines: true }, 'saved, old keys kept');
   await page.evaluate(() => document.querySelector('page-review-overlay').classList.add('capturing'));
   assert.equal(await overlay('.outlines').evaluate((el) => getComputedStyle(el).display), 'none', 'never in the screenshot');
