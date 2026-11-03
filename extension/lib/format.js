@@ -15,17 +15,28 @@ export function toMarkdown(review, screenshot = null) {
   out.push(`# Page review: ${review.title || review.url}`, '');
   out.push(`- **URL:** ${review.url}`);
   out.push(`- **Captured:** ${new Date(review.createdAt).toLocaleString()}`);
+  const shot = review.frame ?? { w: vp.width, h: vp.height };
+  const shotPx = `${Math.round(shot.w * vp.devicePixelRatio)}×${Math.round(shot.h * vp.devicePixelRatio)} px`;
   out.push(
-    `- **Viewport:** ${vp.width}×${vp.height} CSS px, devicePixelRatio ${vp.devicePixelRatio} ` +
-      `(screenshot is ${Math.round(vp.width * vp.devicePixelRatio)}×${Math.round(vp.height * vp.devicePixelRatio)} px)`,
+    `- **Viewport:** ${vp.width}×${vp.height} CSS px, devicePixelRatio ${vp.devicePixelRatio}` +
+      (review.frame ? '' : ` (screenshot is ${shotPx})`),
   );
+  if (review.frame) {
+    const f = review.frame;
+    out.push(`- **Frame:** x=${f.x}, y=${f.y}, ${f.w}×${f.h} CSS px of the viewport (the screenshot shows only this area, ${shotPx})`);
+  }
   out.push(`- **Scroll position:** x=${review.scroll.x}, y=${review.scroll.y}`);
   out.push(
     `- **Screenshot:** ${screenshot ? `\`${screenshot}\`` : 'the annotated screenshot, shared separately'}. ` +
       "The reviewer's drawings are baked in; the numbered pins and badges match the comment numbers below.",
   );
   out.push('');
-  out.push('Coordinates are CSS pixels relative to the viewport at capture time.', '');
+  out.push(
+    review.frame
+      ? "Coordinates are CSS pixels relative to the frame's top-left corner (the screenshot's top-left) at capture time."
+      : 'Coordinates are CSS pixels relative to the viewport at capture time.',
+    '',
+  );
   const open = review.comments.filter((c) => (c.status ?? 'open') === 'open').length;
   const tracked = review.comments.some((c) => c.status && c.status !== 'open');
   out.push(`## Comments (${review.comments.length}${tracked ? `, ${open} open` : ''})`, '');

@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { toMarkdown } from '../extension/lib/format.js';
 
 const AGENT = process.env.AGENT_SYNC === '1';
 const root = path.resolve(import.meta.dirname, '..');
@@ -72,7 +73,7 @@ try {
   const inject = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'lib/frame.js', 'content.js'] });
     }, pageUrl);
   await inject();
   await page.waitForSelector('page-review-overlay');
@@ -699,6 +700,79 @@ try {
   await inject();
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
+  // Frame: drag out a capture area, move and resize it; Esc or the reset button go back to the
+  // full page. With a frame, Copy image and Save capture only that area, marks outside it are
+  // left out and saved coordinates are relative to it.
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const frameBtn = overlay('[data-tool="frame"]');
+  assert.equal(await frameBtn.getAttribute('aria-label'), 'Frame');
+  const cropBox = () => overlay('.crop').boundingBox();
+  await frameBtn.click();
+  await drag([200, 200], [500, 400]);
+  assert.deepEqual(await cropBox(), { x: 200, y: 200, width: 300, height: 200 });
+  await page.keyboard.press('Escape');
+  assert.equal(await overlay('.crop').isHidden(), true, 'Esc: back to the full page');
+  assert.equal(await page.locator('page-review-overlay').count(), 1, 'and the editor stays open');
+  await drag([200, 200], [500, 400]);
+  const reset = overlay('.crop .reset');
+  assert.match(await reset.getAttribute('aria-label'), /Reset frame/);
+  await reset.click();
+  assert.equal(await overlay('.crop').isHidden(), true, 'reset button: back to the full page');
+  const buyNow = await page.locator('#buy').boundingBox();
+  const fx = Math.round(buyNow.x) - 60;
+  const fy = Math.round(buyNow.y) - 150;
+  await drag([fx - 30, fy - 20], [fx + 470, fy + 280]); // 500×300
+  await drag([fx + 200, fy + 100], [fx + 230, fy + 120]); // move it inside: +30, +20
+  await drag([fx + 500, fy + 300], [fx + 520, fy + 310]); // resize from the bottom-right handle
+  const frame = { x: fx, y: fy, w: 520, h: 310 };
+  assert.deepEqual(await cropBox(), { x: frame.x, y: frame.y, width: frame.w, height: frame.h });
+  await page.keyboard.press('t');
+  const pin = [Math.round(buyNow.x) + 10, Math.round(buyNow.y) + 10];
+  await page.mouse.click(...pin);
+  await page.keyboard.type('Inside the frame');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('r');
+  await drag([1100, 650], [1200, 740]); // well outside the frame
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: path.join(outDir, '6-frame.png') });
+  // The dimming and handles are never captured.
+  await page.evaluate(() => document.querySelector('page-review-overlay').classList.add('capturing'));
+  assert.equal(await overlay('.crop').evaluate((el) => getComputedStyle(el).display), 'none');
+  await page.evaluate(() => document.querySelector('page-review-overlay').classList.remove('capturing'));
+  const pngSize = (dataUrl) => {
+    const buf = Buffer.from(dataUrl.split(',')[1], 'base64');
+    return [buf.readUInt32BE(16), buf.readUInt32BE(20)];
+  };
+  await overlay('[data-action="copy"]').click();
+  await overlay('.toast').filter({ hasText: 'Screenshot copied.' }).waitFor();
+  const framedCopy = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    const bmp = await createImageBitmap(await item.getType('image/png'));
+    return [bmp.width, bmp.height];
+  });
+  assert.deepEqual(framedCopy, [frame.w, frame.h], 'Copy image is cropped to the frame');
+  await page.keyboard.press('Control+s');
+  await overlay('.toast').filter({ hasText: saved('1 comment') }).waitFor();
+  const framed = (await storedReviews())[0];
+  fs.writeFileSync(path.join(outDir, '6-frame-captured.png'), Buffer.from(framed.screenshot.split(',')[1], 'base64'));
+  assert.deepEqual(pngSize(framed.screenshot), [frame.w, frame.h], 'saved screenshot is cropped');
+  assert.deepEqual(framed.frame, frame);
+  assert.equal(framed.comments.length, 1, 'the box outside the frame is left out');
+  assert.equal(framed.shapes.length, 1);
+  const inside = framed.comments[0];
+  assert.equal(inside.n, 1);
+  assert.equal(inside.target.selector, '#buy');
+  assert.deepEqual(inside.badge, { x: pin[0] - frame.x, y: pin[1] - frame.y }, 'badge relative to the frame');
+  assert.equal(inside.target.rect.x, Math.round(buyNow.x - frame.x), 'target box relative to the frame');
+  assert.equal(inside.target.rect.y, Math.round(buyNow.y - frame.y));
+  assert.deepEqual([framed.shapes[0].ax, framed.shapes[0].ay], [pin[0] - frame.x, pin[1] - frame.y]);
+  const framedMd = toMarkdown(framed);
+  assert.match(framedMd, new RegExp(`\\*\\*Frame:\\*\\* x=${frame.x}, y=${frame.y}, ${frame.w}×${frame.h}`));
+  assert.match(framedMd, /relative to the frame's top-left corner/);
+  await inject(); // close (saved)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
   // Combine: drag one screenshot onto another, create a Before / After image from them.
   await reviewsPage.bringToFront();
   await reviewsPage.reload();
@@ -714,6 +788,7 @@ try {
   assert.equal(await reviewCards.count(), reviewCount + 1);
   const combined = (await storedReviews()).find((r) => r.composite);
   assert.deepEqual(combined.composite.sources.map((s) => s.label), ['Before', 'After']);
+  assert.equal(combined.composite.sources[1].id, framed.id, 'the cropped screenshot is combined like any other');
   assert.ok(combined.composite.sources[0].createdAt <= combined.composite.sources[1].createdAt, 'older one is Before');
   fs.writeFileSync(path.join(outDir, '5-combined.png'), Buffer.from(combined.screenshot.split(',')[1], 'base64'));
 

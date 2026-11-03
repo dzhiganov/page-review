@@ -38,6 +38,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Bend an arrow | Arrows come out slightly curved. Select one and drag the dot in its middle; drag it flat to straighten |
 | Edit a comment | Double-click it, or click it and use the bar next to it (text, font, size, bold, color, delete) |
 | Show elements | The frame button keeps the elements your marks point at outlined, and outlines the one under the cursor |
+| Frame | **F**, then drag a rectangle: Save and Copy image capture only that area, outside it is dimmed. Drag inside it to move it, its corners to resize it. **Esc** (with the Frame tool) or the reset button above it goes back to the whole visible page. Lasts until you exit |
 | Undo / redo | **Ctrl/Cmd+Z** · **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** (any keyboard layout) |
 | Save | **Ctrl/Cmd+S** |
 | Copy image | The copy button next to Save puts the annotated screenshot on the clipboard without saving a review (https pages) |
@@ -128,7 +129,7 @@ refresh the page you're reviewing.
 
 ## Limitations
 
-- Captures the visible part of the page only (no full-page reviews yet).
+- Captures the visible part of the page (or a framed part of it) only (no full-page reviews yet).
 - Saved reviews can't be reopened for editing.
 - Content inside iframes isn't detected.
 - Doesn't run on `chrome://` pages, the Chrome Web Store or the PDF viewer.

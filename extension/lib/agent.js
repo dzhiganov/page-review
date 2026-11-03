@@ -80,7 +80,7 @@ ${where.join('\n')}
 One folder per review, \`reviews/<id>/\`:
 
 - \`review.md\`: the comments, numbered to match the badges in the screenshot. Start here.
-- \`screenshot.png\`: the visible part of the page as the user saw it, with their drawings and numbered badges baked in.
+- \`screenshot.png\`: the visible part of the page as the user saw it (or the area they framed), with their drawings and numbered badges baked in.
 - \`review.json\`: the same data, structured (fields below).
 
 Ids start with a base-36 timestamp, so they sort by time. The newest review is the last id in sorted order
@@ -123,6 +123,8 @@ const READING = `## Reading a review
 - \`id\`, \`url\`, \`title\`, \`createdAt\` (ISO time).
 - \`viewport\`: \`width\`, \`height\` in CSS px and \`devicePixelRatio\`. Screenshot pixels = CSS px × devicePixelRatio.
 - \`scroll\`: page scroll position at capture time.
+- \`frame\` (only when the user framed part of the page): \`x\`, \`y\`, \`w\`, \`h\` in viewport CSS px. The screenshot
+  shows only that area, and all other coordinates are relative to its top-left corner.
 - \`comments[]\`:
   - \`n\`: number shown on the badge. \`text\`: the comment (may be empty).
   - \`kind\`: \`arrow\`, \`box\`, \`freehand\` or \`text\`. \`marks\`: drawing types that make up the comment.

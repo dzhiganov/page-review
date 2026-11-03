@@ -1,5 +1,6 @@
 // Service worker: injects the overlay, captures screenshots, stores reviews.
 import { AGENT_SYNC } from './lib/flags.js';
+import './lib/frame.js'; // globalThis.PageReviewFrame: crop maths shared with the overlay
 import { pushReview, serverHealth } from './lib/server.js';
 import { getSettings, sendsToServer } from './lib/settings.js';
 import { exportReview, writePendingDownloads } from './lib/storage.js';
@@ -63,7 +64,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     // content.js toggles itself when injected a second time.
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: ['lib/notes.js', 'lib/arrows.js', 'content.js'],
+      files: ['lib/notes.js', 'lib/arrows.js', 'lib/frame.js', 'content.js'],
     });
   } catch (err) {
     // chrome://, the Web Store, PDF viewer etc. can't be scripted.
@@ -75,14 +76,14 @@ chrome.action.onClicked.addListener(async (tab) => {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'save') {
-    saveReview(msg.review, sender.tab).then(sendResponse, (err) =>
+    saveReview(msg.review, sender.tab, msg.crop).then(sendResponse, (err) =>
       sendResponse({ ok: false, error: err.message }),
     );
     return true; // async response
   }
   if (msg.type === 'capture') {
     // "Copy image" in the overlay: the same capture as a save, but nothing is stored.
-    chrome.tabs.captureVisibleTab(sender.tab.windowId, { format: 'png' }).then(
+    capture(sender.tab.windowId, msg.crop).then(
       (dataUrl) => sendResponse({ ok: true, dataUrl }),
       (err) => sendResponse({ ok: false, error: err.message }),
     );
@@ -94,10 +95,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return false;
 });
 
-async function saveReview(review, tab) {
+async function saveReview(review, tab, crop) {
   // The overlay hides its toolbar before sending this message, so the capture
   // contains the page plus the reviewer's drawings and numbered badges only.
-  const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+  const screenshot = await capture(tab.windowId, crop);
   const full = { ...review, screenshot };
   await chrome.storage.local.set({ [`review:${review.id}`]: full });
   // Hand it to the agent's local server right away (the alarm retries later if it's down),
@@ -106,6 +107,22 @@ async function saveReview(review, tab) {
   const exported = await exportReview(full, settings);
   // `synced` drives the overlay's "sent to Claude" message, so it's only set for the server.
   return { ok: true, id: review.id, synced: sendsToServer(settings, AGENT_SYNC) ? exported : null };
+}
+
+// The visible tab as a PNG data URL, cut down to the frame when one is set.
+// crop: { frame: { x, y, w, h }, viewport: { width, height } } in CSS px, or null.
+async function capture(windowId, crop) {
+  const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+  if (!crop) return dataUrl;
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const r = globalThis.PageReviewFrame.cropRect(crop.frame, bitmap.width, bitmap.height, crop.viewport.width);
+  const canvas = new OffscreenCanvas(r.w, r.h);
+  canvas.getContext('2d').drawImage(bitmap, r.x, r.y, r.w, r.h, 0, 0, r.w, r.h);
+  bitmap.close();
+  const bytes = new Uint8Array(await (await canvas.convertToBlob({ type: 'image/png' })).arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:image/png;base64,${btoa(bin)}`;
 }
 
 function openReviews() {

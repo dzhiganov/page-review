@@ -9,6 +9,7 @@
   const { DEFAULT_FONT, normalizeFont, stepSize, noteCss } = globalThis.PageReviewNotes;
   const { isCurved, defaultBend, midpoint: arrowMidpoint, bendThrough, tailForCard, arrowPathData, relativeBend, applyRelativeBend } =
     globalThis.PageReviewArrows;
+  const { frameFrom, isFrame, moveFrame, fitFrame, itemsInFrame, cropItems } = globalThis.PageReviewFrame;
   const COLORS = ['#e03131', '#f08c00', '#1971c2', '#2f9e44', '#868e96', '#1e1e1e'];
   const COLOR_NAMES = ['Red', 'Orange', 'Blue', 'Green', 'Grey', 'Black'];
   const NOTE_MAX_W = 280;
@@ -39,6 +40,8 @@
     folder: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
     edit: '<path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
+    frame: '<path d="M7 3v14h14"/><path d="M3 7h14v14"/>',
+    reset: '<path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/>',
   };
 
   // Shortcuts use physical keys (e.code), so they also work with non-Latin layouts.
@@ -49,6 +52,7 @@
     { id: 'rect', code: 'KeyR', title: 'Box (R)' },
     { id: 'text', code: 'KeyT', title: 'Comment (T)' },
     { id: 'eraser', code: 'KeyE', title: 'Eraser (E)' },
+    { id: 'frame', code: 'KeyF', title: 'Frame (F)', label: 'Frame' },
   ];
 
   const STYLES = `
@@ -66,6 +70,24 @@
     .canvas .handle[data-handle="ne"], .canvas .handle[data-handle="sw"] { cursor: nesw-resize; }
     .notes { position: absolute; inset: 0; pointer-events: none; }
     .frame { position: fixed; inset: 0; border: 3px solid #7048e8; pointer-events: none; }
+
+    /* The capture area: everything outside it is dimmed. Movable and resizable with the Frame tool. */
+    .crop { position: fixed; pointer-events: none; box-shadow: 0 0 0 1.5px #7048e8, 0 0 0 100vmax rgba(15,15,20,.45); }
+    .crop[hidden] { display: none; }
+    :host([data-tool="frame"]) .crop { pointer-events: auto; cursor: move; }
+    .crop .handle { position: absolute; width: 9px; height: 9px; margin: -4.5px; background: #fff; border: 1.5px solid #7048e8; border-radius: 2px; }
+    :host(:not([data-tool="frame"])) .crop .handle { display: none; }
+    .crop .handle[data-crop="nw"] { left: 0; top: 0; cursor: nwse-resize; }
+    .crop .handle[data-crop="ne"] { left: 100%; top: 0; cursor: nesw-resize; }
+    .crop .handle[data-crop="se"] { left: 100%; top: 100%; cursor: nwse-resize; }
+    .crop .handle[data-crop="sw"] { left: 0; top: 100%; cursor: nesw-resize; }
+    .crop .reset {
+      all: unset; position: absolute; right: 0; top: -34px; width: 28px; height: 28px; display: grid; place-items: center;
+      border-radius: 8px; background: #1f1f24; color: #eee; cursor: pointer; pointer-events: auto; box-shadow: 0 4px 14px rgba(0,0,0,.25);
+    }
+    .crop.reset-inside .reset { top: 6px; right: 6px; }
+    .crop .reset:hover { background: #34343c; }
+    .crop .reset svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
     .note-card {
       position: absolute; pointer-events: auto; display: flex; align-items: flex-start; gap: 8px;
@@ -173,7 +195,7 @@
     .toast[hidden] { display: none; }
     .toast button { all: unset; cursor: pointer; color: #b197fc; font-weight: 600; }
     :host(.capturing) .toolbar, :host(.capturing) .hints, :host(.capturing) .outlines, :host(.capturing) .selection,
-    :host(.capturing) .toast, :host(.capturing) .frame, :host(.capturing) .note-tools,
+    :host(.capturing) .toast, :host(.capturing) .frame, :host(.capturing) .crop, :host(.capturing) .note-tools,
     :host(.capturing) .note-card.leaving { display: none !important; }
   `;
 
@@ -197,11 +219,13 @@
     dirty: false,
     saving: false,
     noteFont: { ...DEFAULT_FONT }, // font for new comments: the last one picked in this session
+    crop: null, // capture area { x, y, w, h } in viewport CSS px; null: the whole viewport
+    cropDrag: null, // drawing, moving or resizing the capture area
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
   let avatarSrc = null; // the user's avatar (Settings on the reviews page), shown on comment cards
   let avatarBlocked = false; // the page refused to load it once (e.g. its CSP): use the icon from then on
-  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, outlinesEl, toolbar, noteTools, toastEl, toastTimer;
+  let host, shadow, stage, svg, shapesLayer, selectionLayer, badgeLayer, notesLayer, hintsEl, outlinesEl, cropEl, toolbar, noteTools, toastEl, toastTimer;
 
   // ---------- lifecycle ----------
 
@@ -218,6 +242,11 @@
         <svg class="canvas" xmlns="${SVG_NS}"><g class="shapes"></g><g class="selection"></g><g class="badges"></g></svg>
         <div class="notes"></div>
       </div>
+      <div class="crop" hidden>
+        <span class="handle" data-crop="nw"></span><span class="handle" data-crop="ne"></span>
+        <span class="handle" data-crop="se"></span><span class="handle" data-crop="sw"></span>
+        <button class="reset" title="Full page (Esc)" aria-label="Reset frame to the full page">${icon('reset')}</button>
+      </div>
       <div class="frame"></div>
       <div class="toolbar" role="toolbar"></div>
       <div class="note-tools" role="toolbar" hidden></div>
@@ -231,6 +260,7 @@
     notesLayer = shadow.querySelector('.notes');
     hintsEl = shadow.querySelector('.hints');
     outlinesEl = shadow.querySelector('.outlines');
+    cropEl = shadow.querySelector('.crop');
     toolbar = shadow.querySelector('.toolbar');
     noteTools = shadow.querySelector('.note-tools');
     toastEl = shadow.querySelector('.toast');
@@ -244,8 +274,12 @@
     stage.addEventListener('dblclick', onStageDblClick);
     stage.addEventListener('pointermove', onHover);
     stage.addEventListener('pointerleave', onHover);
+    cropEl.addEventListener('pointerdown', onCropPointerDown);
+    cropEl.addEventListener('pointermove', onPointerMove);
+    cropEl.addEventListener('pointerup', onPointerUp);
+    cropEl.querySelector('.reset').addEventListener('click', () => setCrop(null));
     window.addEventListener('scroll', scheduleOutlines, true);
-    window.addEventListener('resize', scheduleOutlines);
+    window.addEventListener('resize', onResize);
     // Drawings are tied to the viewport, so the page must not scroll under them.
     host.addEventListener('wheel', preventDefault, { passive: false });
     host.addEventListener('touchmove', preventDefault, { passive: false });
@@ -256,7 +290,9 @@
     chrome.storage.local.get('settings').then(({ settings }) => {
       avatarSrc = avatarBlocked ? null : (settings?.avatar ?? null);
     });
-    Object.assign(state, { open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT } });
+    Object.assign(state, {
+      open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT }, crop: null, cropDrag: null,
+    });
     nodes.clear();
     document.documentElement.appendChild(host);
     setTool(state.tool);
@@ -268,7 +304,7 @@
     if (state.dirty && !confirm('Discard unsaved annotations?')) return;
     window.removeEventListener('keydown', onKeyDown, true);
     window.removeEventListener('scroll', scheduleOutlines, true);
-    window.removeEventListener('resize', scheduleOutlines);
+    window.removeEventListener('resize', onResize);
     host.remove();
     state.open = false;
     state.textInput = null;
@@ -288,7 +324,8 @@
   function buildToolbar() {
     const parts = [`<button class="grip" title="Drag to move">${icon('grip')}</button>`];
     for (const t of TOOLS) {
-      parts.push(`<button data-tool="${t.id}" title="${t.title}">${icon(t.id)}</button>`);
+      const label = t.label ? ` aria-label="${t.label}"` : '';
+      parts.push(`<button data-tool="${t.id}" title="${t.title}"${label}>${icon(t.id)}</button>`);
     }
     parts.push(`<button data-action="outlines" title="Show elements" aria-label="Show elements">${icon('outlines')}</button>`);
     parts.push('<span class="sep"></span>');
@@ -441,6 +478,11 @@
       stage.setPointerCapture(e.pointerId);
       return;
     }
+    if (state.tool === 'frame') {
+      // Outside the current frame: draw a new one.
+      startCropDrag(e, stage, 'new');
+      return;
+    }
     const hit = shapeAt(e.target);
     if (state.tool === 'eraser') {
       state.erasing = true;
@@ -472,6 +514,7 @@
   function onPointerMove(e) {
     const x = e.clientX;
     const y = e.clientY;
+    if (state.cropDrag) return dragCrop(x, y);
     if (state.handleDrag) {
       const hd = state.handleDrag;
       if (!hd.moved) {
@@ -516,6 +559,7 @@
 
   function onPointerUp() {
     state.erasing = false;
+    if (state.cropDrag) return endCropDrag();
     if (state.handleDrag) {
       if (state.handleDrag.moved) {
         state.dirty = true;
@@ -672,6 +716,63 @@
     state.selected = null;
     renderAll();
     state.dirty = false;
+  }
+
+  // ---------- frame (capture area) ----------
+
+  // Inside the frame: move it; on a corner handle: resize it against the opposite corner.
+  function onCropPointerDown(e) {
+    if (e.button !== 0 || state.tool !== 'frame' || e.target.closest('.reset')) return;
+    e.stopPropagation();
+    startCropDrag(e, cropEl, e.target.dataset?.crop ?? 'move');
+  }
+
+  function startCropDrag(e, el, kind) {
+    const f = state.crop;
+    const fixed = f && kind.length === 2 && [kind.includes('w') ? f.x + f.w : f.x, kind.includes('n') ? f.y + f.h : f.y];
+    state.cropDrag = { kind, fixed, x: e.clientX, y: e.clientY, original: f };
+    el.setPointerCapture(e.pointerId);
+  }
+
+  function dragCrop(x, y) {
+    const d = state.cropDrag;
+    const [vw, vh] = [innerWidth, innerHeight];
+    if (d.kind === 'new') state.crop = frameFrom(d.x, d.y, x, y, vw, vh);
+    else if (d.kind === 'move') state.crop = moveFrame(d.original, x - d.x, y - d.y, vw, vh);
+    else state.crop = frameFrom(d.fixed[0], d.fixed[1], x, y, vw, vh);
+    renderCrop();
+  }
+
+  function endCropDrag() {
+    const d = state.cropDrag;
+    state.cropDrag = null;
+    // A click (or a frame too small to mean anything) leaves the frame as it was.
+    if (!isFrame(state.crop)) state.crop = d.original;
+    state.crop = state.crop && roundBox(state.crop);
+    renderCrop();
+  }
+
+  function setCrop(frame) {
+    state.crop = frame;
+    renderCrop();
+  }
+
+  function renderCrop() {
+    const f = state.crop;
+    cropEl.hidden = !f;
+    if (!f) return;
+    Object.assign(cropEl.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
+    cropEl.classList.toggle('reset-inside', f.y < 40); // no room for the reset button above the frame
+  }
+
+  function onResize() {
+    if (state.crop) setCrop(fitFrame(state.crop, innerWidth, innerHeight));
+    scheduleOutlines();
+  }
+
+  // What the capture covers, for the service worker: the frame, or null for the whole viewport.
+  function cropSpec() {
+    return state.crop && { frame: roundBox(state.crop), viewport: { width: innerWidth, height: innerHeight } };
   }
 
   // ---------- comment cards ----------
@@ -1218,7 +1319,9 @@
       }
     }
 
-    const comments = [...groups, ...loose].map(toComment);
+    let comments = [...groups, ...loose].map(toComment);
+    // With a frame, only what shows in it is captured, so only that is numbered.
+    if (state.crop) comments = itemsInFrame(state.crop, comments, state.shapes, boxOf);
     comments.sort((a, b) => a.badge.y - b.badge.y || a.badge.x - b.badge.x);
     comments.forEach((c, i) => (c.n = i + 1));
     return comments;
@@ -1524,7 +1627,7 @@
     const png = (async () => {
       await enterCapture();
       try {
-        const res = await chrome.runtime.sendMessage({ type: 'capture' });
+        const res = await chrome.runtime.sendMessage({ type: 'capture', crop: cropSpec() });
         if (!res?.ok) throw new Error(res?.error ?? 'no response');
         return dataUrlToBlob(res.dataUrl);
       } finally {
@@ -1563,8 +1666,12 @@
       return;
     }
     state.saving = true;
+    const crop = cropSpec();
     const comments = await enterCapture();
     try {
+      // With a frame the image is cropped to it: marks outside it are left out, and the
+      // coordinates are moved to match the image.
+      const framed = crop ? cropItems(crop.frame, comments, state.shapes, boxOf) : { items: comments, shapes: state.shapes };
       const review = {
         id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         url: location.href,
@@ -1572,10 +1679,11 @@
         createdAt: new Date().toISOString(),
         viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
         scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
-        comments,
-        shapes: state.shapes,
+        ...(crop ? { frame: crop.frame } : {}),
+        comments: framed.items,
+        shapes: framed.shapes,
       };
-      const res = await chrome.runtime.sendMessage({ type: 'save', review });
+      const res = await chrome.runtime.sendMessage({ type: 'save', review, crop });
       if (!res?.ok) throw new Error(res?.error ?? 'no response');
       state.dirty = false;
       host.classList.remove('capturing');
@@ -1618,8 +1726,9 @@
         avatar.textContent = String(c.n);
         continue;
       }
-      const x = clamp(c.badge.x - 14, 14, innerWidth - 14);
-      const y = clamp(c.badge.y - 14, 14, innerHeight - 14);
+      const area = state.crop ?? { x: 0, y: 0, w: innerWidth, h: innerHeight }; // badges stay inside the image
+      const x = clamp(c.badge.x - 14, area.x + 14, area.x + area.w - 14);
+      const y = clamp(c.badge.y - 14, area.y + 14, area.y + area.h - 14);
       const g = svgEl('g', {});
       g.append(svgEl('circle', { cx: x, cy: y, r: 13, fill: '#18181b', stroke: '#fff', 'stroke-width': 2 }));
       const t = svgEl('text', {
@@ -1671,7 +1780,11 @@
     if (mod && e.code === 'KeyZ') e.shiftKey ? redo() : undo();
     else if (mod && e.code === 'KeyY') redo();
     else if (mod && e.code === 'KeyS') save();
-    else if (e.key === 'Escape') sel ? select(null) : close();
+    else if (e.key === 'Escape') {
+      if (state.tool === 'frame' && state.crop) setCrop(null); // back to the full page
+      else if (sel) select(null);
+      else close();
+    }
     else if (sel && (e.key === 'Delete' || e.key === 'Backspace')) removeShape(sel);
     else if (sel && NUDGE[e.key]) {
       const step = e.shiftKey ? 10 : 1;

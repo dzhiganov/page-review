@@ -42,7 +42,7 @@ try {
   const toggleOverlay = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'lib/frame.js', 'content.js'] });
     }, pageUrl);
   const openOverlay = async () => {
     await toggleOverlay();
