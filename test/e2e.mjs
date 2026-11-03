@@ -354,15 +354,47 @@ try {
   assert.equal(await overlay('.note-card textarea').inputValue(), 'Edit me please', 'double-click edits');
   await page.keyboard.press('Escape');
 
+  // A fresh auto-comment's bar is aligned straight away (while the card is still scaling in)
+  // and after its animation, without typing anything.
+  const barOnOpen = async () =>
+    page.evaluate(
+      () =>
+        new Promise((resolve) =>
+          requestAnimationFrame(() => {
+            const root = document.querySelector('page-review-overlay').shadowRoot;
+            const card = root.querySelector('.note-card.editing');
+            const bar = root.querySelector('.note-tools').getBoundingClientRect();
+            resolve({ card: card.offsetLeft, bar: bar.left, animating: card.getAnimations().length > 0 });
+          }),
+        ),
+    );
+  await page.keyboard.press('a');
+  await drag([300, 700], [520, 640]);
+  const early = await barOnOpen();
+  assert.ok(Math.abs(early.bar - early.card) < 0.6, `aligned on open: ${JSON.stringify(early)}`);
+  await page.waitForTimeout(300);
+  const settled = await barOnOpen();
+  const cardBox = await overlay('.note-card.editing').boundingBox();
+  assert.ok(Math.abs(settled.bar - cardBox.x) < 0.6, `aligned after the animation: ${JSON.stringify([settled, cardBox.x])}`);
+  await page.keyboard.press('Control+z'); // close the empty comment and drop the arrow
+  await page.keyboard.press('v');
+
   // The style bar is left-aligned with the card, 12px away, for narrow and wide cards alike.
+  // Expected: below the card (above only without room), 12px gap, left-aligned unless that
+  // would run off the window (8px margin), never overlapping the card.
   const barCheck = async (card) => {
     await card.locator('.text').click();
     const [c, b] = [await card.boundingBox(), await overlay('.note-tools').boundingBox()];
-    const gap = b.y > c.y ? b.y - (c.y + c.height) : c.y - (b.y + b.height);
-    assert.ok(Math.abs(b.x - c.x) < 0.6, `bar left-aligned: card ${c.x}, bar ${b.x}`);
+    const vp = page.viewportSize();
+    const roomBelow = c.y + c.height + 12 + b.height <= vp.height - 8;
+    const gap = roomBelow ? b.y - (c.y + c.height) : c.y - (b.y + b.height);
+    assert.ok(roomBelow ? b.y > c.y : b.y < c.y, `below unless no room: ${JSON.stringify([c, b])}`);
     assert.ok(Math.abs(gap - 12) < 0.6, `12px gap, got ${gap}`);
+    const expectedX = Math.max(8, Math.min(c.x, vp.width - 8 - b.width));
+    assert.ok(Math.abs(b.x - expectedX) < 0.6, `left edge: card ${c.x}, bar ${b.x}, expected ${expectedX}`);
+    assert.ok(b.x + b.width <= vp.width - 8 + 0.5, 'inside the window');
     await page.keyboard.press('Escape');
-    return [c.width, b.width];
+    return [c.width, b.width, { shifted: b.x < c.x - 0.5, above: !roomBelow }];
   };
   const [narrow, barW] = await barCheck(overlay('.note-card').filter({ hasText: 'Edit me please' }));
   assert.ok(narrow < barW, 'a card narrower than the bar');
@@ -373,6 +405,17 @@ try {
   await page.keyboard.press('v');
   await barCheck(overlay('.note-card').filter({ hasText: 'A much wider comment' }));
   await page.keyboard.press('Control+z'); // drop it again, the checks below count cards
+  // Near the right edge (the bar shifts left just enough) and near the bottom (it flips above).
+  for (const [x, y, text] of [[1250, 420, 'Right edge'], [620, 785, 'Bottom edge']]) {
+    await page.keyboard.press('t');
+    await page.mouse.click(x, y);
+    await page.keyboard.type(text);
+    await page.keyboard.press('Enter');
+    await page.keyboard.press('v');
+    const [, , how] = await barCheck(overlay('.note-card').filter({ hasText: text }));
+    assert.deepEqual(how, text === 'Right edge' ? { shifted: true, above: false } : { shifted: false, above: true }, text);
+    await page.keyboard.press('Control+z');
+  }
 
   // Undo/redo right after drawing an arrow: the empty comment closes and the arrow goes.
   await page.keyboard.press('a');

@@ -18,6 +18,7 @@
   const NOTE_MAX_W = 280;
   const STROKE_PX = 3; // drawings' stroke width
   const NOTE_TOOLS_GAP = 12; // between a comment card and its style bar
+  const NOTE_TOOLS_MARGIN = 8; // between the style bar and the edge of the window
   const AVATAR_PX = 24;
   const CARD_RADIUS = 16; // .note-card border-radius; the corner at the pin is CARD_PIN_RADIUS
   const CARD_PIN_RADIUS = 4;
@@ -819,11 +820,26 @@
     return sel?.type === 'text' ? sel : null;
   }
 
+  // The bar follows its card's size: a new card scales in, its avatar image loads, its text
+  // wraps. Each of those re-measures it.
+  let toolsCard = null;
+  const toolsObserver = new ResizeObserver(() => updateNoteTools());
+  function watchToolsCard(card) {
+    if (card === toolsCard) return;
+    toolsObserver.disconnect();
+    toolsCard = card;
+    if (!card) return;
+    toolsObserver.observe(card);
+    card.addEventListener('animationend', updateNoteTools, { once: true });
+    card.querySelector('.avatar img')?.addEventListener('load', updateNoteTools, { once: true });
+  }
+
   function updateNoteTools() {
     if (!noteTools) return;
     const s = noteToolsTarget();
     const card = s && (state.textInput?.el ?? nodes.get(s.id));
     noteTools.hidden = !card;
+    watchToolsCard(card ?? null);
     if (!card) return;
     const f = normalizeFont(s.font);
     noteTools.classList.toggle('editing', !!state.textInput);
@@ -831,18 +847,17 @@
     for (const b of noteTools.querySelectorAll('[data-note-color]')) b.setAttribute('aria-pressed', String(b.dataset.noteColor === f.color));
     noteTools.querySelector('[data-note="bold"]').setAttribute('aria-pressed', String(f.weight === 700));
     noteTools.querySelector('.size').textContent = String(f.size);
-    // On the side of the card away from its pin (so it doesn't cover what the pin points at),
-    // or the other side when there's no room.
-    // Layout box, not getBoundingClientRect: a new card is still scaling in when this runs.
+    // Below the card, left-aligned with it; above only when there's no room below; shifted
+    // sideways only as far as needed to stay on screen. Measured from the card's layout box,
+    // not getBoundingClientRect: a new card is still scaling in when this first runs.
     const r = { left: card.offsetLeft, top: card.offsetTop, bottom: card.offsetTop + card.offsetHeight };
     const t = { width: noteTools.offsetWidth, height: noteTools.offsetHeight };
-    const above = r.top - t.height - NOTE_TOOLS_GAP;
     const below = r.bottom + NOTE_TOOLS_GAP;
-    const pinOnTop = card.classList.contains('flip-y');
-    const fitsBelow = below + t.height <= innerHeight - EDGE_PX;
-    const top = (pinOnTop && fitsBelow) || above < EDGE_PX ? below : above;
-    // Left-aligned with the card; shifted left only when it would run off the right edge.
-    noteTools.style.left = `${Math.max(EDGE_PX, Math.min(r.left, innerWidth - t.width - EDGE_PX))}px`;
+    const above = r.top - NOTE_TOOLS_GAP - t.height;
+    const fitsBelow = below + t.height <= innerHeight - NOTE_TOOLS_MARGIN;
+    const top = fitsBelow || above < NOTE_TOOLS_MARGIN ? below : above;
+    const left = Math.max(NOTE_TOOLS_MARGIN, Math.min(r.left, innerWidth - NOTE_TOOLS_MARGIN - t.width));
+    noteTools.style.left = `${left}px`;
     noteTools.style.top = `${top}px`;
   }
 
