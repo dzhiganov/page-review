@@ -529,6 +529,8 @@
   function onPointerDown(e) {
     if (e.button !== 0 || e.target.closest('textarea')) return;
     state.pressedNote = null;
+    // A press starts fresh: a flag left by a drag whose click never fired must not swallow this one.
+    state.skipClick = false;
     if (state.textInput) {
       commitText();
       // With the Comment tool a click elsewhere just finishes the comment; other tools carry on.
