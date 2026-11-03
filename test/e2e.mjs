@@ -481,8 +481,14 @@ try {
   await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(pageUrl).origin });
   const reviewsBefore = (await storedReviews()).length;
   const copyBtn = overlay('[data-action="copy"]');
-  assert.equal(await copyBtn.getAttribute('aria-label'), 'Copy image');
+  assert.equal(await copyBtn.getAttribute('aria-label'), 'Copy');
+  const copyMenu = overlay('[role="menu"]');
+  assert.equal(await copyMenu.isHidden(), true);
   await copyBtn.click();
+  assert.equal(await copyBtn.getAttribute('aria-expanded'), 'true');
+  assert.deepEqual(await copyMenu.getByRole('menuitem').allTextContents(), ['Copy image', 'Copy for agent'], 'exactly two items');
+  await copyMenu.getByRole('menuitem', { name: 'Copy image' }).click();
+  assert.equal(await copyMenu.isHidden(), true, 'choosing an item closes the menu');
   await overlay('.toast').filter({ hasText: 'Screenshot copied.' }).waitFor();
   const copied = await page.evaluate(async () => {
     const [item] = await navigator.clipboard.read();
@@ -754,6 +760,86 @@ try {
   await inject(); // close (saved)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
 
+  // Copy for agent: the copy menu's second item puts the review on the clipboard as Markdown
+  // (from the review.md generator), without saving. Keyboard: arrows move, Enter picks, Esc closes.
+  await inject();
+  await page.waitForSelector('page-review-overlay');
+  const navLink = await page.locator('aside nav a').nth(2).boundingBox();
+  await page.keyboard.press('a');
+  await drag([560, 520], [navLink.x + 40, navLink.y + navLink.height / 2]);
+  await page.keyboard.type('Make font bigger');
+  await page.keyboard.press('Enter');
+  const buyAgent = await page.locator('#buy').boundingBox();
+  await page.keyboard.press('t');
+  await page.mouse.click(buyAgent.x + 10, buyAgent.y + 10);
+  await page.keyboard.type('Use brand purple');
+  await page.keyboard.press('Shift+Enter');
+  await page.keyboard.type('and round it more');
+  await page.keyboard.press('Enter');
+  const apiAgent = await page.locator('.card').nth(2).boundingBox();
+  await page.keyboard.press('r');
+  await drag([apiAgent.x - 6, apiAgent.y - 6], [apiAgent.x + apiAgent.width + 6, apiAgent.y + apiAgent.height + 6]);
+  await page.keyboard.press('Escape'); // a box without text, around an element: it still says something
+  await page.keyboard.press('s');
+  await page.mouse.click(buyAgent.x + 20, buyAgent.y + 20);
+  await page.keyboard.type('Click Buy');
+  await page.keyboard.press('Enter');
+  await page.mouse.click(apiAgent.x + 30, apiAgent.y + 30);
+  await page.keyboard.type('Open API Layer');
+  await page.keyboard.press('Enter');
+  const reviewsBeforeAgent = (await storedReviews()).length;
+  const agentMenu = overlay('[role="menu"]');
+  await overlay('[data-action="copy"]').click();
+  await page.keyboard.press('Escape');
+  assert.equal(await agentMenu.isHidden(), true, 'Esc closes the menu');
+  assert.equal(await page.locator('page-review-overlay').count(), 1, '...and only the menu');
+  assert.equal(await overlay('[data-action="copy"]').evaluate((b) => b.getRootNode().activeElement === b), true, 'focus back on the button');
+  await page.keyboard.press('ArrowDown'); // opens the menu on its first item
+  assert.equal(await agentMenu.isVisible(), true);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await overlay('[role="menuitem"]:focus').textContent(), 'Copy for agent');
+  await page.keyboard.press('Enter');
+  await overlay('.toast').filter({ hasText: 'Markdown for the agent copied.' }).waitFor();
+  const agentText = await page.evaluate(async () => {
+    const [item] = await navigator.clipboard.read();
+    return { types: item.types, text: await (await item.getType('text/plain')).text() };
+  });
+  assert.deepEqual(agentText.types, ['text/plain']);
+  const agentMd = agentText.text;
+  fs.writeFileSync(path.join(outDir, 'copy-for-agent.md'), agentMd);
+  assert.equal((await storedReviews()).length, reviewsBeforeAgent, 'copying saves nothing');
+  const agentLines = agentMd.split('\n');
+  assert.deepEqual(agentLines.slice(0, 5), [
+    '## Page feedback',
+    `Fixture: Course 2026 — ${pageUrl}   (viewport 1280×800)`,
+    '',
+    "Screenshot: not attached (this text doesn't include the image).",
+    '',
+  ]);
+  const blocks = agentMd.split(/\n(?=### )/).slice(1).map((b) => b.trim());
+  // Comments in badge order (top to bottom): the box's (no text), the standalone one, the arrow's.
+  assert.equal(blocks.length, 4, agentMd);
+  assert.match(blocks[0], /^### 1\. \S*div\.card:nth-of-type\(3\)\n_\(no text: a box is drawn around it\)_$/, 'a bare box around an element');
+  assert.equal(blocks[1], '### 2. #buy\nUse brand purple\nand round it more', 'standalone comment: the element under its pin');
+  assert.match(blocks[2], /^### 3\. \S*a:nth-of-type\(3\)\nMake font bigger$/, 'arrow comment: the element the arrow points at');
+  assert.match(blocks[3], /^### Steps\n\n1\. Click Buy — #buy\n2\. Open API Layer — \S*div\.card:nth-of-type\(3\)$/);
+  // After a save with the files written (the local server), the text names the screenshot file.
+  await page.keyboard.press('Control+s');
+  await overlay('.toast').filter({ hasText: saved('3 comments, 2 steps') }).waitFor();
+  await overlay('[data-action="copy"]').click();
+  await overlay('[role="menuitem"]').filter({ hasText: 'Copy for agent' }).click();
+  await overlay('.toast').filter({ hasText: 'Markdown for the agent copied.' }).waitFor();
+  const savedAgentMd = await page.evaluate(() => navigator.clipboard.readText());
+  const savedAgent = (await storedReviews())[0];
+  assert.equal(
+    savedAgentMd.split('\n')[3],
+    AGENT
+      ? `Screenshot: \`${store.screenshotPath(savedAgent.id)}\` (its numbered badges match the numbers below).`
+      : "Screenshot: not attached (this text doesn't include the image).", // kept in the browser only
+  );
+  await inject(); // close (saved)
+  await page.waitForSelector('page-review-overlay', { state: 'detached' });
+
   // Frame: drag out a capture area, move and resize it; Esc or the reset button go back to the
   // full page. With a frame, Copy image and Save capture only that area, marks outside it are
   // left out and saved coordinates are relative to it.
@@ -799,6 +885,7 @@ try {
     return [buf.readUInt32BE(16), buf.readUInt32BE(20)];
   };
   await overlay('[data-action="copy"]').click();
+  await overlay('[role="menuitem"]').filter({ hasText: 'Copy image' }).click();
   await overlay('.toast').filter({ hasText: 'Screenshot copied.' }).waitFor();
   const framedCopy = await page.evaluate(async () => {
     const [item] = await navigator.clipboard.read();

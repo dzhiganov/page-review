@@ -42,7 +42,7 @@ the toolbar, or right-click the icon → *Open saved reviews*.
 | Frame | **F**, then drag a rectangle: Save and Copy image capture only that area, outside it is dimmed. Drag inside it to move it, its corners to resize it. **Esc** (with the Frame tool) or the reset button above it goes back to the whole visible page. Lasts until you exit |
 | Undo / redo | **Ctrl/Cmd+Z** · **Ctrl/Cmd+Shift+Z** or **Ctrl+Y** (any keyboard layout) |
 | Save | **Ctrl/Cmd+S** |
-| Copy image | The copy button next to Save puts the annotated screenshot on the clipboard without saving a review (https pages) |
+| Copy | The copy button next to Save opens a menu: **Copy image** puts the annotated screenshot on the clipboard (https pages); **Copy for agent** copies the comments and steps as Markdown, each with its element, ready to paste into an AI agent. Neither saves a review. If you saved first and reviews are written to Downloads or the local server, the Markdown names the screenshot file |
 | Exit | **Esc** (the first Esc deselects) |
 
 The page can't scroll while review mode is on, because drawings belong to the

@@ -70,3 +70,40 @@ test('review.md lists steps as their own ordered list, after the comments', () =
   assert.match(steps, /^2\. Pick a plan\n {3}- \*\*Target:\*\* none found$/m);
   assert.doesNotMatch(toMarkdown({ url: 'u', createdAt: '2026-11-03T10:00:00Z', viewport: { width: 1, height: 1, devicePixelRatio: 1 }, scroll: { x: 0, y: 0 }, comments: [] }), /## Steps/, 'no section without steps');
 });
+
+test('Copy for agent (brief form): frame in the header, screenshot path, bare marks only with an element', () => {
+  const review = {
+    url: 'https://example.com/',
+    title: 'Shop',
+    createdAt: '2026-11-03T10:00:00Z',
+    viewport: { width: 1280, height: 800, devicePixelRatio: 2 },
+    frame: { x: 100, y: 50, w: 600, h: 400 },
+    scroll: { x: 0, y: 0 },
+    comments: [
+      { n: 1, text: '', kind: 'freehand', target: null }, // nothing to say: left out
+      { n: 2, text: '', kind: 'arrow', target: { selector: '#buy', tag: 'button' } },
+      { n: 3, text: 'Fix', kind: 'text', target: { selector: `main > ${'div.long-class-name > '.repeat(4)}p`, tag: 'p', text: 'Hello' } },
+    ],
+    steps: [{ n: 1, kind: 'step', text: 'Go', target: null }],
+  };
+  assert.equal(
+    toMarkdown(review, '/home/me/reviews/x/screenshot.png', { brief: true }),
+    [
+      '## Page feedback',
+      'Shop — https://example.com/   (viewport 1280×800; frame 600×400 at x=100, y=50)',
+      '',
+      'Screenshot: `/home/me/reviews/x/screenshot.png` (its numbered badges match the numbers below).',
+      '',
+      '### 2. #buy',
+      '_(no text: an arrow points at it)_',
+      '',
+      '### 3. p "Hello"',
+      'Fix',
+      '',
+      '### Steps',
+      '',
+      '1. Go — (no element found)',
+      '',
+    ].join('\n'),
+  );
+});

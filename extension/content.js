@@ -171,6 +171,15 @@
     .toolbar button.save { background: #7048e8; font-weight: 600; padding: 0 12px; margin-left: 2px; }
     .toolbar button.save:hover { background: #845ef7; }
     .toolbar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .toolbar button:focus-visible { outline: 2px solid #b197fc; outline-offset: -2px; }
+    .toolbar .copy-wrap { position: relative; display: inline-flex; }
+    .toolbar .menu {
+      position: absolute; top: calc(100% + 10px); right: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px;
+      background: #1f1f24; border-radius: 10px; box-shadow: 0 8px 28px rgba(0,0,0,.28);
+    }
+    .toolbar .menu[hidden] { display: none; }
+    .toolbar .menu button { justify-content: flex-start; height: 30px; padding: 0 10px; white-space: nowrap; }
+    .toolbar .menu button:focus { background: rgba(255,255,255,.12); outline: none; }
     .toolbar .grip { cursor: grab; min-width: 20px; padding: 0; opacity: .6; }
     .toolbar .grip svg { fill: currentColor; stroke: none; }
     .sep { width: 1px; height: 20px; background: rgba(255,255,255,.18); margin: 0 4px; }
@@ -225,6 +234,7 @@
     noteFont: { ...DEFAULT_FONT }, // font for new comments: the last one picked in this session
     crop: null, // capture area { x, y, w, h } in viewport CSS px; null: the whole viewport
     cropDrag: null, // drawing, moving or resizing the capture area
+    saved: null, // { id, snapshot } of the last save, for "Copy for agent"
   };
   const nodes = new Map(); // shape id -> <g> (drawings) or .note-card (comments)
   let avatarSrc = null; // the user's avatar (Settings on the reviews page), shown on comment cards
@@ -295,7 +305,7 @@
       avatarSrc = avatarBlocked ? null : (settings?.avatar ?? null);
     });
     Object.assign(state, {
-      open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT }, crop: null, cropDrag: null,
+      open: true, shapes: [], history: [], future: [], selected: null, dirty: false, noteFont: { ...DEFAULT_FONT }, crop: null, cropDrag: null, saved: null,
     });
     nodes.clear();
     document.documentElement.appendChild(host);
@@ -343,7 +353,14 @@
     parts.push(`<button data-action="redo" title="Redo (Ctrl/Cmd+Shift+Z)">${icon('redo')}</button>`);
     parts.push(`<button data-action="clear" title="Clear all">${icon('clear')}</button>`);
     parts.push(`<button data-action="reviews" title="Open saved reviews">${icon('folder')}</button>`);
-    parts.push(`<button data-action="copy" title="Copy image" aria-label="Copy image">${icon('copy')}</button>`);
+    parts.push(
+      '<span class="copy-wrap">' +
+        `<button data-action="copy" title="Copy" aria-label="Copy" aria-haspopup="menu" aria-expanded="false" aria-controls="copy-menu">${icon('copy')}</button>` +
+        '<div class="menu" id="copy-menu" role="menu" aria-label="Copy" hidden>' +
+        '<button role="menuitem" tabindex="-1" data-copy="image">Copy image</button>' +
+        '<button role="menuitem" tabindex="-1" data-copy="agent">Copy for agent</button>' +
+        '</div></span>',
+    );
     parts.push('<button data-action="save" class="save" title="Save (Ctrl/Cmd+S)">Save</button>');
     parts.push(`<button data-action="close" title="Exit (Esc)">${icon('close')}</button>`);
     toolbar.innerHTML = parts.join('');
@@ -359,12 +376,62 @@
       else if (action === 'clear') clearAll();
       else if (action === 'reviews') chrome.runtime.sendMessage({ type: 'open-reviews' });
       else if (action === 'save') save();
-      else if (action === 'copy') copyImage();
+      else if (action === 'copy') setCopyMenu(copyMenu.hidden);
+      else if (btn.dataset.copy) {
+        setCopyMenu(false);
+        toolbar.querySelector('[data-action="copy"]').focus();
+        if (btn.dataset.copy === 'image') copyImage();
+        else copyForAgent();
+      }
       else if (action === 'close') close();
       else if (action === 'outlines') setOutlines(!state.outlines, true);
     });
     enableToolbarDrag(toolbar.querySelector('.grip'));
     setColor(state.color);
+    copyMenu = toolbar.querySelector('.menu');
+    // A press anywhere else closes the copy menu.
+    shadow.addEventListener('pointerdown', (e) => !e.composedPath().includes(copyMenu.parentElement) && setCopyMenu(false), true);
+  }
+
+  // ---------- copy menu (Copy image / Copy for agent) ----------
+
+  let copyMenu;
+
+  function setCopyMenu(open, focusLast = false) {
+    if (open) commitText();
+    copyMenu.hidden = !open;
+    toolbar.querySelector('[data-action="copy"]').setAttribute('aria-expanded', String(open));
+    if (open) menuItems().at(focusLast ? -1 : 0).focus();
+  }
+
+  function menuItems() {
+    return [...copyMenu.querySelectorAll('[role="menuitem"]')];
+  }
+
+  // Keys while the copy menu is open, or on its button. Returns true when handled.
+  function onCopyMenuKey(e) {
+    const button = toolbar.querySelector('[data-action="copy"]');
+    const focused = shadow.activeElement;
+    if (copyMenu.hidden) {
+      if (focused !== button || !['ArrowDown', 'ArrowUp', ' ', 'Enter'].includes(e.key)) return false;
+      setCopyMenu(true, e.key === 'ArrowUp');
+      return true;
+    }
+    const items = menuItems();
+    const i = items.indexOf(focused);
+    if (e.key === 'Escape') {
+      setCopyMenu(false);
+      button.focus();
+    } else if (e.key === 'ArrowDown') items[(i + 1) % items.length].focus();
+    else if (e.key === 'ArrowUp') items[(i - 1 + items.length) % items.length].focus();
+    else if (e.key === 'Home') items[0].focus();
+    else if (e.key === 'End') items.at(-1).focus();
+    else if (e.key === 'Enter' || e.key === ' ') (items[i] ?? items[0]).click();
+    else {
+      setCopyMenu(false); // any other key (Tab, a shortcut) closes it and does its usual thing
+      return false;
+    }
+    return true;
   }
 
   function enableToolbarDrag(grip) {
@@ -1693,16 +1760,62 @@
     // let a page write to the clipboard as a direct result of the user's action.
     navigator.clipboard
       .write([new ClipboardItem({ 'image/png': png })])
-      .then(
-        () => toast('Screenshot copied.'),
-        (err) =>
-          toast(
-            err?.name === 'NotAllowedError'
-              ? "Couldn't copy: the browser blocked the clipboard. Click the page and try again."
-              : `Couldn't copy: ${err?.message ?? err}`,
-          ),
-      )
+      .then(() => toast('Screenshot copied.'), copyFailed)
       .finally(() => (state.saving = false));
+  }
+
+  // A review as saved (without the screenshot). With a frame the image is cropped to it: marks
+  // outside it are left out, and the coordinates are moved to match the image.
+  function reviewData(comments, steps, crop) {
+    const items = [...comments, ...steps];
+    const framed = crop ? cropItems(crop.frame, items, state.shapes, boxOf) : { items, shapes: state.shapes };
+    return {
+      id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      url: location.href,
+      title: document.title,
+      createdAt: new Date().toISOString(),
+      viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
+      scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
+      ...(crop ? { frame: crop.frame } : {}),
+      comments: framed.items.filter((c) => c.kind !== 'step'),
+      steps: framed.items.filter((c) => c.kind === 'step'),
+      shapes: framed.shapes,
+    };
+  }
+
+  // What a save records, to tell whether anything changed since the last one.
+  function editSnapshot() {
+    return JSON.stringify([state.shapes, state.crop]);
+  }
+
+  // The review as Markdown for an AI agent (comments with their elements, then the steps),
+  // from the same generator as review.md. Saves nothing. When the review was saved since the
+  // last change and its files were written (Downloads or the local server), the text names
+  // the screenshot file; otherwise it says the screenshot isn't attached.
+  function copyForAgent() {
+    commitText();
+    if (state.saving) return;
+    if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+      toast("Can't copy on this page: the browser only allows it on https pages.");
+      return;
+    }
+    const savedId = state.saved?.snapshot === editSnapshot() ? state.saved.id : null;
+    const review = reviewData(buildComments(), buildSteps(), cropSpec());
+    const text = chrome.runtime.sendMessage({ type: 'agent-markdown', review, savedId }).then((res) => {
+      if (!res?.ok) throw new Error(res?.error ?? 'no response');
+      return new Blob([res.markdown], { type: 'text/plain' });
+    });
+    text.catch(() => {}); // reported through the clipboard write below
+    // Written right away, still inside the click, with the text to follow (see copyImage).
+    navigator.clipboard.write([new ClipboardItem({ 'text/plain': text })]).then(() => toast('Markdown for the agent copied.'), copyFailed);
+  }
+
+  function copyFailed(err) {
+    toast(
+      err?.name === 'NotAllowedError'
+        ? "Couldn't copy: the browser blocked the clipboard. Click the page and try again."
+        : `Couldn't copy: ${err?.message ?? err}`,
+    );
   }
 
   function dataUrlToBlob(url) {
@@ -1723,25 +1836,11 @@
     const steps = buildSteps();
     const comments = await enterCapture();
     try {
-      // With a frame the image is cropped to it: marks outside it are left out, and the
-      // coordinates are moved to match the image.
-      const items = [...comments, ...steps];
-      const framed = crop ? cropItems(crop.frame, items, state.shapes, boxOf) : { items, shapes: state.shapes };
-      const review = {
-        id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
-        url: location.href,
-        title: document.title,
-        createdAt: new Date().toISOString(),
-        viewport: { width: innerWidth, height: innerHeight, devicePixelRatio },
-        scroll: { x: Math.round(scrollX), y: Math.round(scrollY) },
-        ...(crop ? { frame: crop.frame } : {}),
-        comments: framed.items.filter((c) => c.kind !== 'step'),
-        steps: framed.items.filter((c) => c.kind === 'step'),
-        shapes: framed.shapes,
-      };
+      const review = reviewData(comments, steps, crop);
       const res = await chrome.runtime.sendMessage({ type: 'save', review, crop });
       if (!res?.ok) throw new Error(res?.error ?? 'no response');
       state.dirty = false;
+      state.saved = { id: review.id, snapshot: editSnapshot() };
       host.classList.remove('capturing');
       const n = comments.length;
       const what = `${n} comment${n === 1 ? '' : 's'}${steps.length ? `, ${steps.length} step${steps.length === 1 ? '' : 's'}` : ''}`;
@@ -1813,6 +1912,11 @@
   // where e.key would be "я".
   function onKeyDown(e) {
     const mod = e.ctrlKey || e.metaKey;
+    if (onCopyMenuKey(e)) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      return;
+    }
     if (state.textInput && e.composedPath().includes(state.textInput.ta)) {
       // Typing a comment: saving still works (it keeps what was typed), and so does undo/redo
       // while a new comment is still empty, e.g. right after drawing an arrow.

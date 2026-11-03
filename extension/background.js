@@ -3,7 +3,8 @@ import { AGENT_SYNC } from './lib/flags.js';
 import './lib/frame.js'; // globalThis.PageReviewFrame: crop maths shared with the overlay
 import { pushReview, serverHealth } from './lib/server.js';
 import { getSettings, sendsToServer } from './lib/settings.js';
-import { exportReview, writePendingDownloads } from './lib/storage.js';
+import { toMarkdown } from './lib/format.js';
+import { exportReview, screenshotFile, writePendingDownloads } from './lib/storage.js';
 
 const REVIEWS_PAGE = 'reviews.html';
 const SYNC_ALARM = 'sync-pending';
@@ -87,6 +88,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       (dataUrl) => sendResponse({ ok: true, dataUrl }),
       (err) => sendResponse({ ok: false, error: err.message }),
     );
+    return true; // async response
+  }
+  if (msg.type === 'agent-markdown') {
+    // "Copy for agent" in the overlay: the review as Markdown, saving nothing. `savedId` is
+    // the review this one was saved as, when nothing has changed since; its screenshot file
+    // (Downloads or the local server) is then named in the text.
+    (async () => {
+      const screenshot = msg.savedId ? await screenshotFile(msg.savedId) : null;
+      return { ok: true, markdown: toMarkdown(msg.review, screenshot, { brief: true }) };
+    })().then(sendResponse, (err) => sendResponse({ ok: false, error: err.message }));
     return true; // async response
   }
   if (msg.type === 'open-reviews') {

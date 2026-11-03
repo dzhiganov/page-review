@@ -5,7 +5,7 @@
 // Both file layouts are the same: screenshot.png, review.json, review.md.
 import { AGENT_SYNC } from './flags.js';
 import { toMarkdown } from './format.js';
-import { deleteRemote, pushReview } from './server.js';
+import { deleteRemote, pushReview, serverHealth } from './server.js';
 import { getSettings, sendsToServer } from './settings.js';
 
 // Returns true/false for whether the copy outside the browser was written, or null
@@ -26,6 +26,25 @@ export async function exportReview(review, settings) {
         return false;
       },
     );
+  }
+  return null;
+}
+
+// Absolute path of a saved review's screenshot outside the browser (written to Downloads,
+// or received by the local server), or null when there is none.
+export async function screenshotFile(id) {
+  const { downloaded = {}, synced = {} } = await chrome.storage.local.get(['downloaded', 'synced']);
+  const png = downloaded[id]?.ids?.[0];
+  if (png !== undefined && chrome.downloads) {
+    const [item] = await chrome.downloads.search({ id: png });
+    if (item?.filename && item.exists !== false) return item.filename;
+  }
+  if (synced[id]) {
+    const dir = (await serverHealth())?.dataDir;
+    if (dir) {
+      const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/';
+      return [dir, 'reviews', id, 'screenshot.png'].join(sep);
+    }
   }
   return null;
 }

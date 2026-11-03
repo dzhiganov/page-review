@@ -7,9 +7,19 @@ const KIND_LABEL = {
   text: 'Note written directly over the target element',
 };
 
+// What a mark without text says, for the short (clipboard) form.
+const KIND_SHORT = {
+  arrow: 'an arrow points at it',
+  box: 'a box is drawn around it',
+  freehand: 'it is circled or marked',
+};
+
 // `screenshot` is the image's file path, or null when the image is shared separately.
-export function toMarkdown(review, screenshot = null) {
+// `brief`: the short form that "Copy for agent" in the editor puts on the clipboard: each
+// comment with its element and text, then the steps.
+export function toMarkdown(review, screenshot = null, { brief = false } = {}) {
   if (review.composite) return compositeMarkdown(review, screenshot);
+  if (brief) return briefMarkdown(review, screenshot);
   const { viewport: vp } = review;
   const out = [];
   out.push(`# Page review: ${review.title || review.url}`, '');
@@ -70,17 +80,53 @@ export function toMarkdown(review, screenshot = null) {
 }
 
 // Steps: an ordered list, numbered like the purple step badges in the screenshot.
-function stepsSection(review) {
+function stepsSection(review, brief = false) {
   const steps = review.steps ?? [];
   if (!steps.length) return [];
+  if (brief) {
+    const out = ['### Steps', ''];
+    for (const st of steps) out.push(`${st.n}. ${oneLine(st.text) || '_(no text)_'} — ${targetLabel(st.target)}`);
+    return [...out, ''];
+  }
   const out = [`## Steps (${steps.length})`, ''];
   out.push('Steps the reviewer numbered on the page, in order (filled purple badges in the screenshot).', '');
   for (const st of steps) {
-    out.push(`${st.n}. ${st.text ? st.text.replace(/\n/g, ' ') : '_(no text)_'}`);
+    out.push(`${st.n}. ${oneLine(st.text) || '_(no text)_'}`);
     out.push(`   - **Target:** ${st.target ? `\`${st.target.selector}\`${st.target.text ? ` "${st.target.text}"` : ''}` : 'none found'}`);
   }
   out.push('');
   return out;
+}
+
+function briefMarkdown(review, screenshot) {
+  const { viewport: vp, frame: f } = review;
+  const size = `viewport ${vp.width}×${vp.height}${f ? `; frame ${f.w}×${f.h} at x=${f.x}, y=${f.y}` : ''}`;
+  const out = ['## Page feedback', `${review.title || review.url} — ${review.url}   (${size})`, ''];
+  out.push(
+    screenshot
+      ? `Screenshot: \`${screenshot}\` (its numbered badges match the numbers below).`
+      : "Screenshot: not attached (this text doesn't include the image).",
+    '',
+  );
+  // A mark without text only says something when it points at an element.
+  for (const c of review.comments.filter((c) => c.text || c.target)) {
+    out.push(`### ${c.n}. ${targetLabel(c.target)}`);
+    out.push(c.text || `_(no text: ${KIND_SHORT[c.kind] ?? 'marked'})_`, '');
+  }
+  out.push(...stepsSection(review, true));
+  return out.join('\n').trimEnd() + '\n';
+}
+
+// The element in a heading or list item: its selector, or a short label for a long one.
+function targetLabel(t) {
+  if (!t) return '(no element found)';
+  if (t.selector.length <= 60) return t.selector;
+  const name = `${t.tag}${t.id ? `#${t.id}` : ''}`;
+  return t.text ? `${name} "${t.text.length > 40 ? `${t.text.slice(0, 40)}…` : t.text}"` : name;
+}
+
+function oneLine(text) {
+  return (text ?? '').replace(/\s*\n\s*/g, ' ').trim();
 }
 
 // A combined image (made on the reviews page from several reviews with a template).
