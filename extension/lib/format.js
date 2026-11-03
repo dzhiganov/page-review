@@ -1,4 +1,7 @@
 // Turns a stored review into Markdown an AI agent can read.
+import './label.js'; // globalThis.PageReviewLabel
+
+const { elementLabel, labelText } = globalThis.PageReviewLabel;
 
 const KIND_LABEL = {
   arrow: 'Arrow pointing at the target element',
@@ -52,7 +55,7 @@ export function toMarkdown(review, screenshot = null, { brief = false } = {}) {
   out.push(`## Comments (${review.comments.length}${tracked ? `, ${open} open` : ''})`, '');
 
   for (const c of review.comments) {
-    out.push(`### ${c.n}`, '');
+    out.push(c.target ? `### ${c.n}. ${nameOf(c.target)}` : `### ${c.n}`, '');
     out.push(c.text ? c.text.split('\n').map((l) => `> ${l}`).join('\n') : '> _(drawing only, no text)_');
     out.push('');
     if (c.status && c.status !== 'open') out.push(`- **Status:** ${c.status}${c.note ? `: ${c.note}` : ''}`);
@@ -85,14 +88,17 @@ function stepsSection(review, brief = false) {
   if (!steps.length) return [];
   if (brief) {
     const out = ['### Steps', ''];
-    for (const st of steps) out.push(`${st.n}. ${oneLine(st.text) || '_(no text)_'} — ${targetLabel(st.target)}`);
+    for (const st of steps) {
+      const where = st.target ? `${nameOf(st.target)} (${shortSelector(st.target)})` : '(no element found)';
+      out.push(`${st.n}. ${oneLine(st.text) || '_(no text)_'} — ${where}`);
+    }
     return [...out, ''];
   }
   const out = [`## Steps (${steps.length})`, ''];
   out.push('Steps the reviewer numbered on the page, in order (filled purple badges in the screenshot).', '');
   for (const st of steps) {
     out.push(`${st.n}. ${oneLine(st.text) || '_(no text)_'}`);
-    out.push(`   - **Target:** ${st.target ? `\`${st.target.selector}\`${st.target.text ? ` "${st.target.text}"` : ''}` : 'none found'}`);
+    out.push(`   - **Target:** ${st.target ? `${nameOf(st.target)} (\`${st.target.selector}\`)` : 'none found'}`);
   }
   out.push('');
   return out;
@@ -117,12 +123,20 @@ function briefMarkdown(review, screenshot) {
   return out.join('\n').trimEnd() + '\n';
 }
 
-// The element in a heading or list item: its selector, or a short label for a long one.
+// The element in a heading: what it is and says, then its selector, e.g. Link "Pricing" — a:nth-of-type(3).
 function targetLabel(t) {
   if (!t) return '(no element found)';
-  if (t.selector.length <= 60) return t.selector;
-  const name = `${t.tag}${t.id ? `#${t.id}` : ''}`;
-  return t.text ? `${name} "${t.text.length > 40 ? `${t.text.slice(0, 40)}…` : t.text}"` : name;
+  return `${nameOf(t)} — ${shortSelector(t)}`;
+}
+
+// Link "Pricing". Reviews saved before labels were recorded get one from the stored tag and text.
+function nameOf(t) {
+  return labelText(t.label ?? elementLabel(t));
+}
+
+// The selector, or just the tag (and id) when the full path is too long to read.
+function shortSelector(t) {
+  return t.selector.length <= 60 ? t.selector : `${t.tag}${t.id ? `#${t.id}` : ''}`;
 }
 
 function oneLine(text) {

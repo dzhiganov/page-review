@@ -73,7 +73,7 @@ try {
   const inject = () =>
     sw.evaluate(async (url) => {
       const [tab] = await chrome.tabs.query({ url });
-      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'lib/frame.js', 'content.js'] });
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['lib/notes.js', 'lib/arrows.js', 'lib/frame.js', 'lib/label.js', 'content.js'] });
     }, pageUrl);
   await inject();
   await page.waitForSelector('page-review-overlay');
@@ -239,6 +239,7 @@ try {
   fs.writeFileSync(path.join(outDir, 'review.md'), md);
   assert.match(md, /> Make font bigger/);
   assert.match(md, /Target selector:\*\* `#buy`/);
+  assert.match(md, /^### \d\. Button "Buy course"$/m, 'the heading names the element');
   assert.match(md, /annotated screenshot, shared separately/);
 
   // Delete (with confirm).
@@ -752,10 +753,11 @@ try {
   fs.writeFileSync(path.join(outDir, '6-steps-captured.png'), Buffer.from(stepped.screenshot.split(',')[1], 'base64'));
   assert.deepEqual(stepped.steps.map((st) => [st.n, st.kind, st.text]), [[1, 'step', 'Click Buy'], [2, 'step', 'Third step'], [3, 'step', 'Last step']]);
   assert.equal(stepped.steps[0].target.selector, '#buy', 'a step links the element under its pin');
+  assert.deepEqual(stepped.steps[0].target.label, { role: 'Button', text: 'Buy course' }, 'its label is saved with it');
   assert.deepEqual(stepped.comments.map((c) => [c.n, c.text]), [[1, 'Just a comment']], 'steps are not comments');
   assert.deepEqual(stepped.shapes.filter((sh) => sh.type === 'step').map((sh) => sh.text), ['Click Buy', 'Third step', 'Last step']);
   const steppedMd = AGENT ? fs.readFileSync(path.join(store.reviewDir(stepped.id), 'review.md'), 'utf8') : toMarkdown(stepped);
-  assert.match(steppedMd, /## Steps \(3\)\n[^]*\n1\. Click Buy\n {3}- \*\*Target:\*\* `#buy` "Buy course"\n2\. Third step\n[^]*\n3\. Last step\n/);
+  assert.match(steppedMd, /## Steps \(3\)\n[^]*\n1\. Click Buy\n {3}- \*\*Target:\*\* Button "Buy course" \(`#buy`\)\n2\. Third step\n[^]*\n3\. Last step\n/);
   assert.ok(steppedMd.indexOf('> Just a comment') < steppedMd.indexOf('## Steps'), 'comments first, then steps');
   await inject(); // close (saved)
   await page.waitForSelector('page-review-overlay', { state: 'detached' });
@@ -819,10 +821,11 @@ try {
   const blocks = agentMd.split(/\n(?=### )/).slice(1).map((b) => b.trim());
   // Comments in badge order (top to bottom): the box's (no text), the standalone one, the arrow's.
   assert.equal(blocks.length, 4, agentMd);
-  assert.match(blocks[0], /^### 1\. \S*div\.card:nth-of-type\(3\)\n_\(no text: a box is drawn around it\)_$/, 'a bare box around an element');
-  assert.equal(blocks[1], '### 2. #buy\nUse brand purple\nand round it more', 'standalone comment: the element under its pin');
-  assert.match(blocks[2], /^### 3\. \S*a:nth-of-type\(3\)\nMake font bigger$/, 'arrow comment: the element the arrow points at');
-  assert.match(blocks[3], /^### Steps\n\n1\. Click Buy — #buy\n2\. Open API Layer — \S*div\.card:nth-of-type\(3\)$/);
+  // Each heading names the element by its role and visible text, then its selector.
+  assert.match(blocks[0], /^### 1\. Card "API Layer" — \S*div\.card:nth-of-type\(3\)\n_\(no text: a box is drawn around it\)_$/, 'a bare box around an element');
+  assert.equal(blocks[1], '### 2. Button "Buy course" — #buy\nUse brand purple\nand round it more', 'standalone comment: the element under its pin');
+  assert.match(blocks[2], /^### 3\. Link "Frontend" — \S*a:nth-of-type\(3\)\nMake font bigger$/, 'arrow comment: the element the arrow points at');
+  assert.match(blocks[3], /^### Steps\n\n1\. Click Buy — Button "Buy course" \(#buy\)\n2\. Open API Layer — Card "API Layer" \(\S*div\.card:nth-of-type\(3\)\)$/);
   // After a save with the files written (the local server), the text names the screenshot file.
   await page.keyboard.press('Control+s');
   await overlay('.toast').filter({ hasText: saved('3 comments, 2 steps') }).waitFor();

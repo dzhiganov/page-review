@@ -1539,6 +1539,17 @@
       styles,
       ancestors,
       html: truncate(el.outerHTML, 800),
+      label: globalThis.PageReviewLabel.elementLabel({
+        tag: el.tagName,
+        role: el.getAttribute('role'),
+        type: el.getAttribute('type'),
+        value: el.value,
+        classes: [...el.classList],
+        text: el.innerText ?? el.textContent,
+        placeholder: el.getAttribute('placeholder'),
+        alt: el.getAttribute('alt'),
+        ariaLabel: el.getAttribute('aria-label'),
+      }),
     };
   }
 

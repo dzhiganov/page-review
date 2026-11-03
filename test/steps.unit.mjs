@@ -60,13 +60,13 @@ test('review.md lists steps as their own ordered list, after the comments', () =
     scroll: { x: 0, y: 0 },
     comments: [{ n: 1, text: 'Too small', kind: 'text', marks: [], target: null }],
     steps: [
-      { n: 1, kind: 'step', text: 'Open the menu', target: { selector: 'nav > button', text: 'Menu' } },
+      { n: 1, kind: 'step', text: 'Open the menu', target: { selector: 'nav > button', tag: 'button', text: 'Menu' } },
       { n: 2, kind: 'step', text: 'Pick a plan', target: null },
     ],
   });
   const steps = md.slice(md.indexOf('## Steps (2)'));
   assert.ok(md.indexOf('## Comments') < md.indexOf('## Steps'));
-  assert.match(steps, /^1\. Open the menu\n {3}- \*\*Target:\*\* `nav > button` "Menu"$/m);
+  assert.match(steps, /^1\. Open the menu\n {3}- \*\*Target:\*\* Button "Menu" \(`nav > button`\)$/m);
   assert.match(steps, /^2\. Pick a plan\n {3}- \*\*Target:\*\* none found$/m);
   assert.doesNotMatch(toMarkdown({ url: 'u', createdAt: '2026-11-03T10:00:00Z', viewport: { width: 1, height: 1, devicePixelRatio: 1 }, scroll: { x: 0, y: 0 }, comments: [] }), /## Steps/, 'no section without steps');
 });
@@ -84,7 +84,10 @@ test('Copy for agent (brief form): frame in the header, screenshot path, bare ma
       { n: 2, text: '', kind: 'arrow', target: { selector: '#buy', tag: 'button' } },
       { n: 3, text: 'Fix', kind: 'text', target: { selector: `main > ${'div.long-class-name > '.repeat(4)}p`, tag: 'p', text: 'Hello' } },
     ],
-    steps: [{ n: 1, kind: 'step', text: 'Go', target: null }],
+    steps: [
+      { n: 1, kind: 'step', text: 'Go', target: null },
+      { n: 2, kind: 'step', text: 'Buy', target: { selector: '#buy', tag: 'button', text: 'Buy course', label: { role: 'Button', text: 'Buy course' } } },
+    ],
   };
   assert.equal(
     toMarkdown(review, '/home/me/reviews/x/screenshot.png', { brief: true }),
@@ -94,15 +97,16 @@ test('Copy for agent (brief form): frame in the header, screenshot path, bare ma
       '',
       'Screenshot: `/home/me/reviews/x/screenshot.png` (its numbered badges match the numbers below).',
       '',
-      '### 2. #buy',
+      '### 2. Button — #buy',
       '_(no text: an arrow points at it)_',
       '',
-      '### 3. p "Hello"',
+      '### 3. Text "Hello" — p',
       'Fix',
       '',
       '### Steps',
       '',
       '1. Go — (no element found)',
+      '2. Buy — Button "Buy course" (#buy)',
       '',
     ].join('\n'),
   );

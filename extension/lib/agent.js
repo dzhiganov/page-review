@@ -133,7 +133,9 @@ const READING = `## Reading a review
   - \`kind\`: \`arrow\`, \`box\`, \`freehand\` or \`text\`. \`marks\`: drawing types that make up the comment.
   - \`region\`, \`badge\`: where the marks and the number are, in viewport CSS px.
   - \`target\`: \`selector\` (CSS path, unique on the page at capture time), \`tag\`, \`id\`, \`classes\`, \`role\`,
-    \`ariaLabel\`, \`text\` (first 200 characters), \`rect\` (\`x\`, \`y\`, \`w\`, \`h\` in viewport CSS px),
+    \`ariaLabel\`, \`text\` (first 200 characters), \`label\` (\`role\`: Link, Button, Input, Image, Heading, Text,
+    Card, Section or Element; \`text\`: visible text, placeholder or alt, up to 60 characters; missing in older
+    reviews), \`rect\` (\`x\`, \`y\`, \`w\`, \`h\` in viewport CSS px),
     \`styles\` (computed: font, color, spacing, size), \`ancestors\` (nearest first), \`html\` (outerHTML, truncated).
 - \`steps[]\` (may be missing): \`n\` (the step number), \`kind: "step"\`, \`text\`, \`region\`, \`badge\` and \`target\` as
   for comments.
