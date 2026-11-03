@@ -16,6 +16,7 @@
   const PREVIOUS_ATTACH_PX = 240;
   const NOTE_MAX_W = 280;
   const STROKE_PX = 3; // drawings' stroke width
+  const NOTE_TOOLS_GAP = 12; // between a comment card and its style bar
   const AVATAR_PX = 24;
   const CARD_RADIUS = 16; // .note-card border-radius; the corner at the pin is CARD_PIN_RADIUS
   const CARD_PIN_RADIUS = 4;
@@ -795,14 +796,16 @@
     noteTools.querySelector('.size').textContent = String(f.size);
     // On the side of the card away from its pin (so it doesn't cover what the pin points at),
     // or the other side when there's no room.
-    const r = card.getBoundingClientRect();
-    const t = noteTools.getBoundingClientRect();
-    const above = r.top - t.height - 8;
-    const below = r.bottom + 8;
+    // Layout box, not getBoundingClientRect: a new card is still scaling in when this runs.
+    const r = { left: card.offsetLeft, top: card.offsetTop, bottom: card.offsetTop + card.offsetHeight };
+    const t = { width: noteTools.offsetWidth, height: noteTools.offsetHeight };
+    const above = r.top - t.height - NOTE_TOOLS_GAP;
+    const below = r.bottom + NOTE_TOOLS_GAP;
     const pinOnTop = card.classList.contains('flip-y');
     const fitsBelow = below + t.height <= innerHeight - EDGE_PX;
     const top = (pinOnTop && fitsBelow) || above < EDGE_PX ? below : above;
-    noteTools.style.left = `${clamp(r.left, EDGE_PX, innerWidth - t.width - EDGE_PX)}px`;
+    // Left-aligned with the card; shifted left only when it would run off the right edge.
+    noteTools.style.left = `${Math.max(EDGE_PX, Math.min(r.left, innerWidth - t.width - EDGE_PX))}px`;
     noteTools.style.top = `${top}px`;
   }
 

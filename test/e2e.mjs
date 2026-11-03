@@ -354,6 +354,26 @@ try {
   assert.equal(await overlay('.note-card textarea').inputValue(), 'Edit me please', 'double-click edits');
   await page.keyboard.press('Escape');
 
+  // The style bar is left-aligned with the card, 12px away, for narrow and wide cards alike.
+  const barCheck = async (card) => {
+    await card.locator('.text').click();
+    const [c, b] = [await card.boundingBox(), await overlay('.note-tools').boundingBox()];
+    const gap = b.y > c.y ? b.y - (c.y + c.height) : c.y - (b.y + b.height);
+    assert.ok(Math.abs(b.x - c.x) < 0.6, `bar left-aligned: card ${c.x}, bar ${b.x}`);
+    assert.ok(Math.abs(gap - 12) < 0.6, `12px gap, got ${gap}`);
+    await page.keyboard.press('Escape');
+    return [c.width, b.width];
+  };
+  const [narrow, barW] = await barCheck(overlay('.note-card').filter({ hasText: 'Edit me please' }));
+  assert.ok(narrow < barW, 'a card narrower than the bar');
+  await page.keyboard.press('t');
+  await page.mouse.click(300, 560);
+  await page.keyboard.type('A much wider comment card, long enough to wrap onto a second line of text');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('v');
+  await barCheck(overlay('.note-card').filter({ hasText: 'A much wider comment' }));
+  await page.keyboard.press('Control+z'); // drop it again, the checks below count cards
+
   // Undo/redo right after drawing an arrow: the empty comment closes and the arrow goes.
   await page.keyboard.press('a');
   await drag([300, 650], [450, 560]);
